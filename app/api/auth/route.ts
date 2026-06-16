@@ -3,7 +3,13 @@ import { prisma } from "@/lib/prisma";
 
 const SESSION_INCLUDE = {
   team: {
-    select: { id: true, name: true, logoSvg: true, jerseyColor: true, budget: true },
+    select: {
+      id: true,
+      name: true,
+      logoSvg: true,
+      jerseyColor: true,
+      budget: true,
+    },
   },
 } as const;
 
@@ -17,11 +23,17 @@ export async function POST(req: NextRequest) {
   const { solanaWallet } = await req.json();
 
   if (!solanaWallet || typeof solanaWallet !== "string") {
-    return NextResponse.json({ error: "solanaWallet required" }, { status: 400 });
+    return NextResponse.json(
+      { error: "solanaWallet required" },
+      { status: 400 },
+    );
   }
 
   if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(solanaWallet)) {
-    return NextResponse.json({ error: "Invalid Solana wallet address" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Invalid Solana wallet address" },
+      { status: 400 },
+    );
   }
 
   // Check if session already exists — fast path, avoids team lookup on reconnect
@@ -39,11 +51,13 @@ export async function POST(req: NextRequest) {
   }
 
   // New wallet — find unclaimed user-controlled team
-  const userTeam = await prisma.team.findFirst({ where: { isUserControlled: true } });
+  const userTeam = await prisma.team.findFirst({
+    where: { isUserControlled: true },
+  });
   if (!userTeam) {
     return NextResponse.json(
       { error: "No user team found. Run: npm run db:seed" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 
@@ -53,7 +67,7 @@ export async function POST(req: NextRequest) {
   if (alreadyClaimed) {
     return NextResponse.json(
       { error: "Club already claimed by another wallet." },
-      { status: 409 }
+      { status: 409 },
     );
   }
 
@@ -74,7 +88,7 @@ export async function POST(req: NextRequest) {
     if (err?.code === "P2002") {
       return NextResponse.json(
         { error: "Club was just claimed by another wallet. Please try again." },
-        { status: 409 }
+        { status: 409 },
       );
     }
     throw err;
@@ -93,7 +107,13 @@ export async function GET(req: NextRequest) {
     where: { solanaWallet: wallet },
     include: {
       team: {
-        select: { id: true, name: true, logoSvg: true, jerseyColor: true, budget: true },
+        select: {
+          id: true,
+          name: true,
+          logoSvg: true,
+          jerseyColor: true,
+          budget: true,
+        },
       },
     },
   });
@@ -107,42 +127,61 @@ export async function GET(req: NextRequest) {
  * Body: { solanaWallet, displayName?, avatarBase64?, teamName? }
  */
 export async function PATCH(req: NextRequest) {
-  const { solanaWallet, displayName, avatarBase64, teamName } = await req.json();
+  const { solanaWallet, displayName, avatarBase64, teamName } =
+    await req.json();
 
   if (!solanaWallet) {
-    return NextResponse.json({ error: "solanaWallet required" }, { status: 400 });
+    return NextResponse.json(
+      { error: "solanaWallet required" },
+      { status: 400 },
+    );
   }
 
-  const session = await prisma.userSession.findUnique({ where: { solanaWallet } });
+  const session = await prisma.userSession.findUnique({
+    where: { solanaWallet },
+  });
   if (!session) {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
 
-  // Validate avatar size (max 2MB base64 ≈ ~1.5MB image)
   if (avatarBase64 && avatarBase64.length > 2_800_000) {
-    return NextResponse.json({ error: "Avatar too large. Max 2MB." }, { status: 400 });
+    return NextResponse.json(
+      { error: "Avatar too large. Max 2MB." },
+      { status: 400 },
+    );
   }
 
-  const updates: any = { lastSeenAt: new Date() };
-  if (displayName !== undefined) updates.displayName = displayName.slice(0, 30);
+  const updates: Record<string, unknown> = { lastSeenAt: new Date() };
+  if (displayName !== undefined)
+    updates.displayName = String(displayName).slice(0, 30);
   if (avatarBase64 !== undefined) updates.avatarBase64 = avatarBase64;
 
-  const [updatedSession] = await prisma.$transaction([
-    prisma.userSession.update({
-      where: { solanaWallet },
-      data: updates,
-      include: {
-        team: { select: { id: true, name: true, logoSvg: true, jerseyColor: true, budget: true } },
+  // Update session and team name separately to avoid conditional spread in $transaction
+  // which causes Prisma type inference errors at build time
+  const updatedSession = await prisma.userSession.update({
+    where: { solanaWallet },
+    data: updates,
+    include: {
+      team: {
+        select: {
+          id: true,
+          name: true,
+          logoSvg: true,
+          jerseyColor: true,
+          budget: true,
+        },
       },
-    }),
-    // Also update team name if provided
-    ...(teamName
-      ? [prisma.team.update({
-          where: { id: session.teamId },
-          data: { name: teamName.slice(0, 40) },
-        })]
-      : []),
-  ]);
+    },
+  });
+
+  if (teamName) {
+    await prisma.team.update({
+      where: { id: session.teamId },
+      data: { name: String(teamName).slice(0, 40) },
+    });
+    // Reflect updated team name in response
+    updatedSession.team.name = String(teamName).slice(0, 40);
+  }
 
   return NextResponse.json({ session: updatedSession });
 }
