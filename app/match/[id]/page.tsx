@@ -1,0 +1,844 @@
+"use client";
+
+import { useEffect, useState, useCallback } from "react";
+import { useParams, useRouter } from "next/navigation";
+import PitchView from "@/components/pitch/PitchView";
+import TacticsForm from "@/components/tactics/TacticsForm";
+import { formationToSlots } from "@/lib/match-engine/formations";
+import type { MatchEvent, Formation } from "@/lib/match-engine/types";
+import { useMatchSounds, eventToSound } from "@/lib/sound/useMatchSounds";
+import AuthWall from "@/components/auth/AuthWall";
+
+interface TeamInfo {
+  id: string;
+  name: string;
+  isUserControlled: boolean;
+}
+
+interface TacticsResult {
+  formation: Formation;
+  mentality: string;
+  startingXI: string[];
+  instructions: { pressing: string; tempo: string; width: string };
+  reasoning: string;
+}
+
+interface FixtureData {
+  fixtureId: string;
+  homeTeam: TeamInfo;
+  awayTeam: TeamInfo;
+  simulated: boolean;
+  homeScore?: number;
+  awayScore?: number;
+  homeTactics?: TacticsResult;
+  awayTactics?: TacticsResult;
+  events?: MatchEvent[];
+}
+
+const EVENT_ICONS: Record<string, string> = {
+  KICK_OFF: "🟢",
+  GOAL: "⚽",
+  SHOT: "🎯",
+  SAVE: "🧤",
+  FOUL: "⚠️",
+  YELLOW_CARD: "🟨",
+  RED_CARD: "🟥",
+  CORNER: "↪",
+  OFFSIDE: "🚩",
+  SUBSTITUTION: "🔄",
+  HALF_TIME: "⏱",
+  FULL_TIME: "🏁",
+};
+
+const EVENT_LABELS: Record<string, string> = {
+  KICK_OFF: "Kick-off!",
+  GOAL: "GOAL!",
+  SHOT: "Shot attempt",
+  SAVE: "Great save!",
+  FOUL: "Foul committed",
+  YELLOW_CARD: "Yellow card",
+  RED_CARD: "Red card",
+  CORNER: "Corner kick",
+  OFFSIDE: "Offside",
+  SUBSTITUTION: "Substitution",
+  HALF_TIME: "Half-time",
+  FULL_TIME: "Full-time",
+};
+
+export default function MatchPage() {
+  return (
+    <AuthWall>
+      <MatchContent />
+    </AuthWall>
+  );
+}
+
+function MatchContent() {
+  const params = useParams();
+  const router = useRouter();
+  const fixtureId = params.id as string;
+
+  const [data, setData] = useState<FixtureData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [simulating, setSimulating] = useState(false);
+  const [squad, setSquad] = useState<any[] | null>(null);
+  const [tacticsSubmitted, setTacticsSubmitted] = useState(false);
+  const [activeTab, setActiveTab] = useState<"commentary" | "ai">("commentary");
+  const [liveMinute, setLiveMinute] = useState(0);
+  const [liveScore, setLiveScore] = useState({ home: 0, away: 0 });
+  const [feed, setFeed] = useState<MatchEvent[]>([]);
+  const [matchOver, setMatchOver] = useState(false);
+  const [speed, setSpeed] = useState(1);
+  const [goalFlash, setGoalFlash] = useState(0); // incrementing key to retrigger CSS animation
+  const { play, muted, toggleMute } = useMatchSounds();
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/fixtures/${fixtureId}`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Failed to load fixture");
+      setData(json);
+
+      if (!json.simulated) {
+        const userTeam = json.homeTeam.isUserControlled
+          ? json.homeTeam
+          : json.awayTeam.isUserControlled
+            ? json.awayTeam
+            : null;
+        if (userTeam) {
+          const squadRes = await fetch(`/api/teams/${userTeam.id}/squad`);
+          const squadJson = await squadRes.json();
+          setSquad(squadJson.players);
+
+          // Check if tactics already submitted for this fixture
+          const tacticsRes = await fetch(`/api/fixtures/${fixtureId}/tactics`);
+          if (tacticsRes.ok) {
+            setTacticsSubmitted(true);
+          } else {
+            // AUTO-CONFIRM: Try to build tactics from saved squad formation
+            const squadData = await fetch("/api/squad");
+            if (squadData.ok) {
+              const { players, team } = await squadData.json();
+              // Players with a slotIndex set = starting XI
+              const startingXI = players
+                .filter(
+                  (p: any) => p.slotIndex !== null && p.slotIndex !== undefined,
+                )
+                .sort((a: any, b: any) => a.slotIndex - b.slotIndex)
+                .map((p: any) => p.id);
+
+              if (startingXI.length === 11) {
+                // Auto-submit tactics from squad formation
+                const autoSubmit = await fetch(
+                  `/api/fixtures/${fixtureId}/tactics`,
+                  {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      formation: team.formation ?? "4-4-2",
+                      mentality: "BALANCED",
+                      startingXI,
+                      instructions: {
+                        pressing: "MEDIUM",
+                        tempo: "NORMAL",
+                        width: "NORMAL",
+                      },
+                    }),
+                  },
+                );
+                setTacticsSubmitted(autoSubmit.ok);
+                if (autoSubmit.ok) {
+                  setError(null); // clear any prior error
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setLoading(false);
+    }
+  }, [fixtureId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function handleSimulate() {
+    setSimulating(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/fixtures/${fixtureId}/simulate`, {
+        method: "POST",
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Simulation failed");
+      await load();
+      setLiveMinute(0);
+      setLiveScore({ home: 0, away: 0 });
+      setFeed([]);
+      setMatchOver(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setSimulating(false);
+    }
+  }
+
+  const handleMinuteChange = useCallback(
+    (minute: number, events: MatchEvent[]) => {
+      setLiveMinute(minute);
+      setFeed((prev) => [...events.slice().reverse(), ...prev]);
+
+      for (const ev of events) {
+        if (ev.type === "GOAL") {
+          setLiveScore((s) =>
+            ev.team === "HOME"
+              ? { ...s, home: s.home + 1 }
+              : { ...s, away: s.away + 1 },
+          );
+          setGoalFlash((k) => k + 1);
+        }
+        if (ev.type === "FULL_TIME") {
+          setMatchOver(true);
+        }
+
+        const soundKey = eventToSound(ev.type);
+        if (soundKey) play(soundKey);
+      }
+    },
+    [play],
+  );
+
+  if (loading) return <Centered>Loading...</Centered>;
+  if (error) return <Centered>Error: {error}</Centered>;
+  if (!data) return <Centered>Not found</Centered>;
+
+  const userTeam = data.homeTeam.isUserControlled
+    ? data.homeTeam
+    : data.awayTeam.isUserControlled
+      ? data.awayTeam
+      : null;
+
+  // ---- PRE-MATCH ----
+  if (!data.simulated) {
+    return (
+      <div className="page" style={{ maxWidth: 900 }}>
+        <BackLink router={router} />
+        <header style={{ marginBottom: 20 }}>
+          <div className="eyebrow">Pre-Match · Matchday Setup</div>
+          <h1 style={{ fontSize: "1.9rem", textTransform: "uppercase" }}>
+            {data.homeTeam.name}
+            <span style={{ color: "var(--ink-dim)", margin: "0 10px" }}>
+              vs
+            </span>
+            {data.awayTeam.name}
+          </h1>
+        </header>
+
+        {userTeam && squad ? (
+          <div className="panel" style={{ padding: 20 }}>
+            <div
+              className="section-title"
+              style={{ display: "flex", alignItems: "center", gap: 10 }}
+            >
+              <span className="dot home" />
+              Tactics — {userTeam.name}
+              {tacticsSubmitted && (
+                <span
+                  style={{
+                    marginLeft: "auto",
+                    fontSize: 11,
+                    color: "var(--ws-green-bright)",
+                    letterSpacing: 1,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
+                >
+                  ✓ TACTICS CONFIRMED
+                </span>
+              )}
+            </div>
+
+            {tacticsSubmitted && (
+              <div
+                style={{
+                  padding: "10px 14px",
+                  background: "rgba(46,204,113,0.08)",
+                  border: "1px solid rgba(46,204,113,0.3)",
+                  borderRadius: 6,
+                  marginBottom: 16,
+                  fontSize: 13,
+                  color: "var(--ws-green-bright)",
+                }}
+              >
+                ✓ Tactics auto-loaded from your Squad formation. You can still
+                adjust below before kick-off.
+              </div>
+            )}
+
+            <TacticsForm
+              fixtureId={fixtureId}
+              players={squad}
+              onSubmitted={() => setTacticsSubmitted(true)}
+            />
+            <div
+              style={{
+                marginTop: 24,
+                paddingTop: 20,
+                borderTop: "1px solid var(--border)",
+              }}
+            >
+              <KickOffButton
+                onClick={handleSimulate}
+                simulating={simulating}
+                disabled={!tacticsSubmitted}
+              />
+              {!tacticsSubmitted && (
+                <p
+                  style={{
+                    fontSize: 12,
+                    color: "var(--ink-dim)",
+                    marginTop: 8,
+                  }}
+                >
+                  Confirm your tactics above to enable kick-off.
+                </p>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="panel" style={{ padding: 20 }}>
+            <p style={{ color: "var(--ink-dim)", marginTop: 0 }}>
+              Both teams are AI-controlled. Their managers will set tactics
+              automatically on kick-off.
+            </p>
+            <KickOffButton
+              onClick={handleSimulate}
+              simulating={simulating}
+              disabled={false}
+            />
+          </div>
+        )}
+        {error && (
+          <p style={{ color: "var(--home-color)", marginTop: 12 }}>{error}</p>
+        )}
+      </div>
+    );
+  }
+
+  // ---- POST-MATCH / LIVE ----
+  const events = data.events ?? [];
+  const homeSlots = formationToSlots(data.homeTactics!.formation, "HOME");
+  const awaySlots = formationToSlots(data.awayTactics!.formation, "AWAY");
+
+  return (
+    <div className="page">
+      <BackLink router={router} />
+
+      {/* Scoreboard */}
+      <div
+        className="panel"
+        style={{
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          gap: 28,
+          padding: "16px 24px",
+          marginBottom: 12,
+          flexWrap: "wrap",
+        }}
+      >
+        <TeamTag
+          name={data.homeTeam.name}
+          color="var(--home-color)"
+          isUser={data.homeTeam.isUserControlled}
+        />
+
+        <div
+          style={{
+            fontFamily: "var(--mono)",
+            fontSize: "2rem",
+            fontWeight: 700,
+            letterSpacing: 4,
+            minWidth: 110,
+            textAlign: "center",
+          }}
+        >
+          {liveScore.home} — {liveScore.away}
+        </div>
+
+        <TeamTag
+          name={data.awayTeam.name}
+          color="var(--away-color)"
+          isUser={data.awayTeam.isUserControlled}
+          reverse
+        />
+
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 4,
+          }}
+        >
+          <div
+            style={{
+              fontFamily: "var(--mono)",
+              fontSize: "1.1rem",
+              color: "var(--accent)",
+              background: "rgba(255,209,102,0.08)",
+              border: "1px solid rgba(255,209,102,0.3)",
+              borderRadius: 4,
+              padding: "3px 10px",
+              minWidth: 64,
+              textAlign: "center",
+            }}
+          >
+            {matchOver ? "FT" : `${liveMinute}'`}
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            {[1, 2, 4].map((s) => (
+              <button
+                key={s}
+                onClick={() => setSpeed(s)}
+                style={{
+                  background: "transparent",
+                  border:
+                    speed === s
+                      ? "1px solid var(--accent)"
+                      : "1px solid var(--border)",
+                  color: speed === s ? "var(--accent)" : "var(--ink-dim)",
+                  fontFamily: "var(--mono)",
+                  fontSize: "0.7rem",
+                  padding: "2px 8px",
+                  borderRadius: 4,
+                  cursor: "pointer",
+                }}
+              >
+                {s}x
+              </button>
+            ))}
+            <button
+              onClick={toggleMute}
+              className={`ws-sound-toggle ${!muted ? "active" : ""}`}
+              style={{ padding: "2px 8px", fontSize: "0.7rem" }}
+              title={muted ? "Unmute sound effects" : "Mute sound effects"}
+            >
+              {muted ? "🔇" : "🔊"}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div
+        style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 12 }}
+      >
+        {/* Pitch */}
+        <div
+          className="panel"
+          style={{
+            padding: 12,
+            display: "flex",
+            flexDirection: "column",
+            gap: 10,
+            position: "relative",
+          }}
+        >
+          {goalFlash > 0 && <div key={goalFlash} className="ws-goal-flash" />}
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              fontFamily: "var(--display)",
+              fontSize: "0.8rem",
+              textTransform: "uppercase",
+              letterSpacing: 1.5,
+              color: "var(--ink-dim)",
+            }}
+          >
+            <span>2D Match View</span>
+            <span
+              className={matchOver ? "" : "ws-live-badge"}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                color: matchOver ? "var(--ink-dim)" : undefined,
+              }}
+            >
+              {!matchOver && <span className="live-dot" />}
+              {matchOver ? "FULL TIME" : "LIVE"}
+            </span>
+          </div>
+          <PitchView
+            events={events}
+            homeStartingXI={data.homeTactics!.startingXI}
+            awayStartingXI={data.awayTactics!.startingXI}
+            homeFormationSlots={homeSlots}
+            awayFormationSlots={awaySlots}
+            speed={speed}
+            onMinuteChange={handleMinuteChange}
+          />
+        </div>
+
+        {/* Right panel */}
+        <div
+          className="panel"
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+          }}
+        >
+          <div
+            style={{ display: "flex", borderBottom: "1px solid var(--border)" }}
+          >
+            <Tab
+              label="Commentary"
+              active={activeTab === "commentary"}
+              onClick={() => setActiveTab("commentary")}
+            />
+            <Tab
+              label="AI Decision Log"
+              active={activeTab === "ai"}
+              onClick={() => setActiveTab("ai")}
+            />
+          </div>
+
+          {activeTab === "commentary" ? (
+            <div
+              className="scroll-thin"
+              style={{
+                flex: 1,
+                overflowY: "auto",
+                padding: 8,
+                maxHeight: 480,
+                display: "flex",
+                flexDirection: "column",
+                gap: 2,
+              }}
+            >
+              {feed.length === 0 && (
+                <p
+                  style={{ color: "var(--ink-dim)", fontSize: 13, padding: 8 }}
+                >
+                  Match starting...
+                </p>
+              )}
+              {feed.map((ev, i) => (
+                <FeedItem
+                  key={i}
+                  event={ev}
+                  homeTeamName={data.homeTeam.name}
+                  awayTeamName={data.awayTeam.name}
+                />
+              ))}
+            </div>
+          ) : (
+            <div
+              className="scroll-thin"
+              style={{
+                flex: 1,
+                overflowY: "auto",
+                padding: 14,
+                maxHeight: 480,
+              }}
+            >
+              <DecisionCard
+                teamName={data.homeTeam.name}
+                color="var(--home-color)"
+                tactics={data.homeTactics!}
+              />
+              <DecisionCard
+                teamName={data.awayTeam.name}
+                color="var(--away-color)"
+                tactics={data.awayTactics!}
+              />
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BackLink({ router }: { router: ReturnType<typeof useRouter> }) {
+  return (
+    <button onClick={() => router.push("/")} className="ws-back-button">
+      <span className="ws-back-icon">🏆</span>
+      <span>Back to League</span>
+      <span className="ws-back-arrow">→</span>
+    </button>
+  );
+}
+
+function KickOffButton({
+  onClick,
+  simulating,
+  disabled,
+}: {
+  onClick: () => void;
+  simulating: boolean;
+  disabled: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={simulating || disabled}
+      style={{
+        padding: "12px 28px",
+        borderRadius: 6,
+        border: "none",
+        background: disabled ? "var(--border)" : "var(--accent)",
+        color: disabled ? "var(--ink-dim)" : "#0a0d12",
+        fontWeight: 700,
+        fontFamily: "var(--display)",
+        textTransform: "uppercase",
+        letterSpacing: 1.5,
+        fontSize: 14,
+        cursor: disabled ? "not-allowed" : "pointer",
+      }}
+    >
+      {simulating ? "Simulating..." : "Kick Off"}
+    </button>
+  );
+}
+
+function TeamTag({
+  name,
+  color,
+  isUser,
+  reverse,
+}: {
+  name: string;
+  color: string;
+  isUser: boolean;
+  reverse?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: reverse ? "row-reverse" : "row",
+        alignItems: "center",
+        gap: 10,
+        fontFamily: "var(--display)",
+        fontSize: "1.3rem",
+        letterSpacing: 0.5,
+        textTransform: "uppercase",
+      }}
+    >
+      <span
+        className="dot"
+        style={{ background: color, boxShadow: `0 0 8px ${color}` }}
+      />
+      {isUser && (
+        <span style={{ color: "var(--accent)", fontSize: "1rem" }}>★</span>
+      )}
+      {name}
+    </div>
+  );
+}
+
+function Tab({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        flex: 1,
+        padding: 10,
+        textAlign: "center",
+        fontFamily: "var(--display)",
+        fontSize: 12,
+        textTransform: "uppercase",
+        letterSpacing: 1,
+        color: active ? "var(--accent)" : "var(--ink-dim)",
+        borderBottom: active
+          ? "2px solid var(--accent)"
+          : "2px solid transparent",
+        background: active ? "rgba(255,209,102,0.05)" : "transparent",
+        cursor: "pointer",
+      }}
+    >
+      {label}
+    </div>
+  );
+}
+
+function FeedItem({
+  event,
+  homeTeamName,
+  awayTeamName,
+}: {
+  event: MatchEvent;
+  homeTeamName: string;
+  awayTeamName: string;
+}) {
+  const teamName = event.team === "HOME" ? homeTeamName : awayTeamName;
+  const color =
+    event.team === "HOME" ? "var(--home-color)" : "var(--away-color)";
+  const isGoal = event.type === "GOAL";
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        gap: 10,
+        padding: 8,
+        borderRadius: 4,
+        fontSize: 13,
+        alignItems: "flex-start",
+        background: isGoal ? "rgba(255,209,102,0.08)" : "transparent",
+        borderLeft: isGoal
+          ? "2px solid var(--accent)"
+          : "2px solid transparent",
+      }}
+    >
+      <span
+        style={{
+          fontFamily: "var(--mono)",
+          color: "var(--ink-dim)",
+          fontSize: 12,
+          minWidth: 28,
+          paddingTop: 1,
+        }}
+      >
+        {event.minute}'
+      </span>
+      <span style={{ width: 18, textAlign: "center" }}>
+        {EVENT_ICONS[event.type] ?? "•"}
+      </span>
+      <span style={{ lineHeight: 1.4 }}>
+        {event.type !== "HALF_TIME" && event.type !== "FULL_TIME" && (
+          <span style={{ fontWeight: 600, color }}>{teamName}</span>
+        )}{" "}
+        — {EVENT_LABELS[event.type] ?? event.type}
+      </span>
+    </div>
+  );
+}
+
+function DecisionCard({
+  teamName,
+  color,
+  tactics,
+}: {
+  teamName: string;
+  color: string;
+  tactics: TacticsResult;
+}) {
+  const isUser = tactics.reasoning === "__USER__";
+
+  return (
+    <div
+      style={{
+        background: "var(--panel-bg)",
+        border: "1px solid var(--border)",
+        borderRadius: 6,
+        padding: 12,
+        marginBottom: 10,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 6,
+        }}
+      >
+        <span
+          style={{
+            fontFamily: "var(--display)",
+            fontSize: 13,
+            textTransform: "uppercase",
+            letterSpacing: 1,
+            color,
+          }}
+        >
+          {teamName}
+        </span>
+        <span
+          style={{
+            fontFamily: "var(--mono)",
+            fontSize: 11,
+            color: "var(--accent)",
+            background: "rgba(255,209,102,0.1)",
+            border: "1px solid rgba(255,209,102,0.25)",
+            padding: "2px 8px",
+            borderRadius: 10,
+          }}
+        >
+          {tactics.formation} · {tactics.mentality}
+        </span>
+      </div>
+      <p
+        style={{
+          fontSize: 13,
+          color: "var(--ink-dim)",
+          lineHeight: 1.5,
+          fontStyle: "italic",
+        }}
+      >
+        {isUser ? "These are your tactics for this match." : tactics.reasoning}
+      </p>
+      <div
+        style={{
+          display: "flex",
+          gap: 14,
+          marginTop: 8,
+          fontFamily: "var(--mono)",
+          fontSize: 12,
+          color: "var(--ink-dim)",
+          flexWrap: "wrap",
+        }}
+      >
+        <span>
+          Pressing:{" "}
+          <b style={{ color: "var(--ink)" }}>{tactics.instructions.pressing}</b>
+        </span>
+        <span>
+          Tempo:{" "}
+          <b style={{ color: "var(--ink)" }}>{tactics.instructions.tempo}</b>
+        </span>
+        <span>
+          Width:{" "}
+          <b style={{ color: "var(--ink)" }}>{tactics.instructions.width}</b>
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function Centered({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        height: "100vh",
+        color: "var(--ink)",
+      }}
+    >
+      {children}
+    </div>
+  );
+}

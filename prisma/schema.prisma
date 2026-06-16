@@ -1,0 +1,235 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── League & Fixtures ────────────────────────────────────────────────────────
+
+model League {
+  id          String   @id @default(cuid())
+  name        String
+  trophyName  String   @default("Championship Trophy")
+  season      Int      @default(1)
+  tier        Int      @default(1)
+  status      LeagueStatus @default(ACTIVE)
+  startedAt   DateTime @default(now())
+  endsAt      DateTime?
+  teams       Team[]
+  fixtures    Fixture[]
+  createdAt   DateTime @default(now())
+}
+
+enum LeagueStatus {
+  ACTIVE
+  COMPLETED
+}
+
+model Team {
+  id               String   @id @default(cuid())
+  name             String
+  leagueId         String
+  league           League   @relation(fields: [leagueId], references: [id])
+  players          Player[]
+  formation        String   @default("4-4-2")
+  overallAtk       Int      @default(50)
+  overallMid       Int      @default(50)
+  overallDef       Int      @default(50)
+  baseTactics      Json?
+  isUserControlled Boolean  @default(false)
+  logoSvg          String?
+  jerseyColor      String   @default("#ff5252")
+  budget           Int      @default(5000000) // in-game currency
+
+  homeFixtures     Fixture[] @relation("HomeTeam")
+  awayFixtures     Fixture[] @relation("AwayTeam")
+  transfersOut     TransferListing[] @relation("SellingTeam")
+  transfersIn      TransferLog[]     @relation("BuyingTeam")
+  transfersFrom    TransferLog[]     @relation("SellingTeamLog")
+  userSession      UserSession?      // one-to-one: one club per wallet
+
+  @@index([leagueId])
+}
+
+model Player {
+  id           String   @id @default(cuid())
+  teamId       String
+  team         Team     @relation(fields: [teamId], references: [id])
+  name         String
+  position     Position
+  pace         Int
+  shooting     Int
+  passing      Int
+  defending    Int
+  stamina      Int
+  fitness      Int      @default(100)
+  morale       Int      @default(70)
+  // New fields
+  starRating   Int      @default(1)   // 1-5
+  marketValue  Int      @default(100000)
+  avatarSvg    String?
+  nationality  String   @default("International")
+  age          Int      @default(24)
+  isInUserSquad Boolean @default(false) // true = owned by user (regardless of team)
+
+  transferListing TransferListing?
+  transferLogs    TransferLog[]
+
+  @@index([teamId])
+}
+
+enum Position {
+  GK
+  DF
+  MF
+  FW
+}
+
+model Fixture {
+  id          String        @id @default(cuid())
+  leagueId    String
+  league      League        @relation(fields: [leagueId], references: [id])
+  round       Int
+  homeTeamId  String
+  homeTeam    Team          @relation("HomeTeam", fields: [homeTeamId], references: [id])
+  awayTeamId  String
+  awayTeam    Team          @relation("AwayTeam", fields: [awayTeamId], references: [id])
+  status      FixtureStatus @default(SCHEDULED)
+  homeScore   Int?
+  awayScore   Int?
+  matchResult MatchResult?
+  userTactics UserTactics?
+
+  @@index([leagueId, round])
+}
+
+enum FixtureStatus {
+  SCHEDULED
+  SIMULATED
+}
+
+model MatchResult {
+  id          String   @id @default(cuid())
+  fixtureId   String   @unique
+  fixture     Fixture  @relation(fields: [fixtureId], references: [id])
+  homeTactics Json
+  awayTactics Json
+  events      Json
+  narrative   String?
+  createdAt   DateTime @default(now())
+}
+
+model UserTactics {
+  id          String   @id @default(cuid())
+  fixtureId   String   @unique
+  fixture     Fixture  @relation(fields: [fixtureId], references: [id])
+  teamId      String
+  tactics     Json
+  submittedAt DateTime @default(now())
+}
+
+// ─── Transfer Market ──────────────────────────────────────────────────────────
+
+model TransferListing {
+  id          String          @id @default(cuid())
+  playerId    String          @unique
+  player      Player          @relation(fields: [playerId], references: [id])
+  fromTeamId  String
+  fromTeam    Team            @relation("SellingTeam", fields: [fromTeamId], references: [id])
+  price       Int
+  status      ListingStatus   @default(LISTED)
+  listedAt    DateTime        @default(now())
+  soldAt      DateTime?
+}
+
+enum ListingStatus {
+  LISTED
+  SOLD
+  CANCELLED
+}
+
+model TransferLog {
+  id          String   @id @default(cuid())
+  playerId    String
+  player      Player   @relation(fields: [playerId], references: [id])
+  fromTeamId  String?
+  fromTeam    Team?    @relation("SellingTeamLog", fields: [fromTeamId], references: [id])
+  toTeamId    String
+  toTeam      Team     @relation("BuyingTeam", fields: [toTeamId], references: [id])
+  price       Int
+  source      TransferSource @default(MARKET)
+  createdAt   DateTime @default(now())
+}
+
+enum TransferSource {
+  MARKET   // bought from market
+  GACHA    // won via spin
+}
+
+// ─── Gacha / Spin ─────────────────────────────────────────────────────────────
+
+model GachaSpin {
+  id          String    @id @default(cuid())
+  walletAddr  String
+  tier        GachaTier
+  txHash      String    @unique
+  playerId    String?   // assigned after verification
+  status      SpinStatus @default(PENDING)
+  createdAt   DateTime  @default(now())
+}
+
+enum GachaTier {
+  STANDARD  // star 1-3, 0.001 ETH
+  PREMIUM   // star 3-5, 0.005 ETH
+}
+
+enum SpinStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+// ─── Portal / Inbox ───────────────────────────────────────────────────────────
+
+model PortalMessage {
+  id        String      @id @default(cuid())
+  type      MessageType
+  title     String
+  content   String
+  metadata  Json?       // e.g. { playerId, price, fromTeam } for transfer news
+  isRead    Boolean     @default(false)
+  createdAt DateTime    @default(now())
+}
+
+enum MessageType {
+  NEWS          // AI-generated football news
+  TRANSFER      // transfer completed notification
+  LEAGUE        // new league created
+  GACHA         // spin result
+  SYSTEM        // system messages
+}
+
+// ─── User Squad ───────────────────────────────────────────────────────────────
+
+model UserSquad {
+  id          String   @id @default(cuid())
+  playerId    String   @unique
+  slotIndex   Int?     // 0-10 = starting XI slot, null = bench
+  acquiredAt  DateTime @default(now())
+}
+
+// ─── User Session (Privy + Solana) ───────────────────────────────────────────
+
+model UserSession {
+  id            String   @id @default(cuid())
+  solanaWallet  String   @unique
+  teamId        String   @unique
+  team          Team     @relation(fields: [teamId], references: [id])
+  displayName   String?
+  avatarBase64  String?
+  createdAt     DateTime @default(now())
+  lastSeenAt    DateTime @default(now())
+}

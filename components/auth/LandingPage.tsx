@@ -1,0 +1,332 @@
+"use client";
+
+import { useAuth } from "@/lib/auth/useAuth";
+import { useHoverSound } from "@/lib/sound/useHoverSound";
+import { APP_NAME, APP_TAGLINE } from "@/lib/config";
+
+const FEATURES = [
+  {
+    icon: "🤖",
+    title: "AI Managers",
+    desc: "Every opponent club is managed by an AI agent with its own tactical personality and reasoning.",
+  },
+  {
+    icon: "⚽",
+    title: "2D Match View",
+    desc: "Watch matches unfold in real-time with FM-style 2D pitch visualization and live commentary.",
+  },
+  {
+    icon: "💰",
+    title: "Transfer Market",
+    desc: "Scout and sign players, list your own squad members, and build the ultimate team.",
+  },
+  {
+    icon: "🎰",
+    title: "Gacha Spin",
+    desc: "Spend SOL to spin for rare star players. Standard and Premium capsules available.",
+  },
+  {
+    icon: "📨",
+    title: "Manager Portal",
+    desc: "Receive AI-generated match news, transfer alerts, and league announcements daily.",
+  },
+  {
+    icon: "🏆",
+    title: "Auto Leagues",
+    desc: "When a season ends, a new tournament with a unique name and trophy auto-generates.",
+  },
+];
+
+export default function LandingPage() {
+  const { login, loading, error, isPhantomInstalled } = useAuth();
+  const ctaHover = useHoverSound("cta");
+  const subtleHover = useHoverSound("subtle");
+
+  return (
+    <div
+      style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}
+    >
+      {/* Hero */}
+      <section
+        style={{
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          textAlign: "center",
+          padding: "80px 24px 48px",
+          position: "relative",
+        }}
+      >
+        {/* Trophy glow */}
+        <div
+          style={{
+            fontSize: 80,
+            marginBottom: 16,
+            filter: "drop-shadow(0 0 32px rgba(255,215,0,0.5))",
+            animation: "ws-float 3s ease-in-out infinite",
+          }}
+        >
+          🏆
+        </div>
+
+        <div className="ws-badge" style={{ marginBottom: 16 }}>
+          <span className="pulse-ball" />
+          {APP_TAGLINE} · Season Open
+        </div>
+
+        <h1
+          style={{
+            fontFamily: "var(--display)",
+            fontSize: "clamp(2.4rem, 6vw, 4.5rem)",
+            textTransform: "uppercase",
+            letterSpacing: 2,
+            lineHeight: 1.1,
+            marginBottom: 16,
+            background:
+              "linear-gradient(135deg, var(--ink) 0%, var(--ws-gold) 100%)",
+            WebkitBackgroundClip: "text",
+            WebkitTextFillColor: "transparent",
+            backgroundClip: "text",
+          }}
+        >
+          {APP_NAME}
+        </h1>
+
+        <p
+          style={{
+            fontSize: "clamp(14px, 2vw, 18px)",
+            color: "var(--ink-dim)",
+            maxWidth: 520,
+            lineHeight: 1.7,
+            marginBottom: 40,
+          }}
+        >
+          The world's first football management game where every rival is
+          controlled by an AI agent. Connect your Phantom wallet to claim your
+          club and start your managerial career.
+        </p>
+
+        {/* CTA Button */}
+        {!isPhantomInstalled ? (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 12,
+            }}
+          >
+            <a
+              href="https://phantom.app"
+              target="_blank"
+              rel="noopener noreferrer"
+              {...ctaHover}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 10,
+                padding: "16px 36px",
+                borderRadius: 10,
+                background: "linear-gradient(135deg, #ab9ff2, #7c5cbf)",
+                color: "#fff",
+                textDecoration: "none",
+                fontFamily: "var(--display)",
+                fontWeight: 700,
+                fontSize: 16,
+                textTransform: "uppercase",
+                letterSpacing: 1.5,
+                boxShadow: "0 0 32px rgba(171,159,242,0.35)",
+                transition: "transform 0.15s, box-shadow 0.15s",
+              }}
+            >
+              <span style={{ fontSize: 22 }}>👻</span>
+              Install Phantom Wallet
+            </a>
+            <p style={{ fontSize: 12, color: "var(--ink-dim)" }}>
+              Phantom is a free Solana wallet browser extension
+            </p>
+          </div>
+        ) : (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 12,
+            }}
+          >
+            <button
+              onClick={login}
+              disabled={loading}
+              {...ctaHover}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 12,
+                padding: "16px 44px",
+                borderRadius: 10,
+                border: "none",
+                background: loading
+                  ? "var(--border)"
+                  : "linear-gradient(135deg, var(--ws-gold), #e6b800)",
+                color: loading ? "var(--ink-dim)" : "#0a0d12",
+                fontFamily: "var(--display)",
+                fontWeight: 700,
+                fontSize: 16,
+                textTransform: "uppercase",
+                letterSpacing: 1.5,
+                cursor: loading ? "not-allowed" : "pointer",
+                boxShadow: loading ? "none" : "0 0 40px rgba(255,215,0,0.3)",
+                transition: "transform 0.15s, box-shadow 0.15s",
+              }}
+            >
+              <span style={{ fontSize: 22 }}>👻</span>
+              {loading ? "Connecting..." : "Connect Phantom Wallet"}
+            </button>
+            <p style={{ fontSize: 12, color: "var(--ink-dim)" }}>
+              Your wallet address = your permanent club identity
+            </p>
+          </div>
+        )}
+
+        {error && (
+          <div
+            style={{
+              marginTop: 16,
+              padding: "10px 20px",
+              borderRadius: 6,
+              background: "rgba(255,82,82,0.1)",
+              border: "1px solid #ff5252",
+              color: "#ff5252",
+              fontSize: 13,
+            }}
+          >
+            {error}
+          </div>
+        )}
+      </section>
+
+      {/* Features grid */}
+      <section
+        style={{
+          padding: "48px 24px 80px",
+          maxWidth: 1100,
+          margin: "0 auto",
+          width: "100%",
+        }}
+      >
+        <div style={{ textAlign: "center", marginBottom: 40 }}>
+          <div className="eyebrow">Why {APP_NAME}</div>
+          <h2
+            style={{
+              fontFamily: "var(--display)",
+              fontSize: "1.8rem",
+              textTransform: "uppercase",
+            }}
+          >
+            The Future of Football Management
+          </h2>
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+            gap: 16,
+          }}
+        >
+          {FEATURES.map((f) => (
+            <div
+              key={f.title}
+              className="panel ws-fixture-row"
+              {...subtleHover}
+              style={{ padding: 24 }}
+            >
+              <div style={{ fontSize: 36, marginBottom: 12 }}>{f.icon}</div>
+              <h3
+                style={{
+                  fontFamily: "var(--display)",
+                  fontSize: "1rem",
+                  textTransform: "uppercase",
+                  letterSpacing: 1,
+                  marginBottom: 8,
+                  color: "var(--ws-gold)",
+                }}
+              >
+                {f.title}
+              </h3>
+              <p
+                style={{
+                  fontSize: 13,
+                  color: "var(--ink-dim)",
+                  lineHeight: 1.6,
+                }}
+              >
+                {f.desc}
+              </p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Stats bar */}
+      <div
+        style={{
+          borderTop: "1px solid var(--border)",
+          padding: "20px 24px",
+          background: "rgba(10,13,18,0.8)",
+        }}
+      >
+        <div
+          style={{
+            maxWidth: 1100,
+            margin: "0 auto",
+            display: "flex",
+            justifyContent: "center",
+            gap: 48,
+            flexWrap: "wrap",
+          }}
+        >
+          {[
+            ["8", "AI Managers"],
+            ["5★", "Max Player Rating"],
+            ["Solana", "Powered By"],
+            ["Free", "To Play"],
+          ].map(([val, label]) => (
+            <div key={label} style={{ textAlign: "center" }}>
+              <div
+                style={{
+                  fontFamily: "var(--mono)",
+                  fontSize: "1.4rem",
+                  fontWeight: 700,
+                  color: "var(--ws-gold)",
+                }}
+              >
+                {val}
+              </div>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: "var(--ink-dim)",
+                  textTransform: "uppercase",
+                  letterSpacing: 1,
+                }}
+              >
+                {label}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <style>{`
+        @keyframes ws-float {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-12px); }
+        }
+      `}</style>
+    </div>
+  );
+}
