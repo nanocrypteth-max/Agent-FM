@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { createLeagueForWallet } from "@/lib/team-generator/generateLeague";
 
-// Force dynamic rendering — this route queries the DB
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
@@ -19,9 +19,8 @@ const SESSION_INCLUDE = {
 
 /**
  * POST /api/auth
- * Called after Phantom connect. Creates or retrieves session by wallet address.
- * Uses upsert to handle race conditions (rapid reconnect, double-fire events).
- * Body: { solanaWallet: string }
+ * Connect wallet → get or create session + league.
+ * Each wallet gets its own unique team and league vs 7 AI teams.
  */
 export async function POST(req: NextRequest) {
   const { solanaWallet } = await req.json();
@@ -40,68 +39,48 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Check if session already exists — fast path, avoids team lookup on reconnect
+  // Fast path: returning user
   const existing = await prisma.userSession.findUnique({
     where: { solanaWallet },
     include: SESSION_INCLUDE,
   });
 
   if (existing) {
-    // Update lastSeen non-blocking (ignore failure — not critical)
     prisma.userSession
       .update({ where: { id: existing.id }, data: { lastSeenAt: new Date() } })
       .catch(() => {});
     return NextResponse.json({ session: existing, isNew: false });
   }
 
-  // New wallet — find unclaimed user-controlled team
-  const userTeam = await prisma.team.findFirst({
-    where: { isUserControlled: true },
-  });
-  if (!userTeam) {
-    return NextResponse.json(
-      { error: "No user team found. Run: npm run db:seed" },
-      { status: 500 },
-    );
-  }
-
-  const alreadyClaimed = await prisma.userSession.findUnique({
-    where: { teamId: userTeam.id },
-  });
-  if (alreadyClaimed) {
-    return NextResponse.json(
-      { error: "Club already claimed by another wallet." },
-      { status: 409 },
-    );
-  }
-
-  // Use upsert instead of create to handle race conditions (P2002).
-  // If two requests arrive simultaneously for the same wallet,
-  // one will create and the other will update — both return a valid session.
+  // New wallet — generate a full league (1 user team + 7 AI + fixtures)
   try {
-    const session = await prisma.userSession.upsert({
-      where: { solanaWallet },
-      create: { solanaWallet, teamId: userTeam.id },
-      update: { lastSeenAt: new Date() }, // already exists edge case
+    const userTeamId = await createLeagueForWallet(solanaWallet);
+
+    const session = await prisma.userSession.create({
+      data: { solanaWallet, teamId: userTeamId },
       include: SESSION_INCLUDE,
     });
+
     return NextResponse.json({ session, isNew: true });
   } catch (err: any) {
-    // P2002 teamId unique constraint: another wallet claimed this team between
-    // our check and our upsert (extremely rare but handle gracefully)
+    // P2002: race condition (two requests for same wallet simultaneously)
     if (err?.code === "P2002") {
-      return NextResponse.json(
-        { error: "Club was just claimed by another wallet. Please try again." },
-        { status: 409 },
-      );
+      const session = await prisma.userSession.findUnique({
+        where: { solanaWallet },
+        include: SESSION_INCLUDE,
+      });
+      if (session) return NextResponse.json({ session, isNew: false });
     }
-    throw err;
+    console.error("[auth] Failed to create session:", err);
+    return NextResponse.json(
+      { error: "Failed to initialize your club. Please try again." },
+      { status: 500 },
+    );
   }
 }
 
 /**
  * GET /api/auth?wallet=<address>
- * Returns existing session for wallet, or null.
  */
 export async function GET(req: NextRequest) {
   const wallet = new URL(req.url).searchParams.get("wallet");
@@ -109,17 +88,7 @@ export async function GET(req: NextRequest) {
 
   const session = await prisma.userSession.findUnique({
     where: { solanaWallet: wallet },
-    include: {
-      team: {
-        select: {
-          id: true,
-          name: true,
-          logoSvg: true,
-          jerseyColor: true,
-          budget: true,
-        },
-      },
-    },
+    include: SESSION_INCLUDE,
   });
 
   return NextResponse.json({ session });
@@ -127,8 +96,7 @@ export async function GET(req: NextRequest) {
 
 /**
  * PATCH /api/auth
- * Update user profile: displayName and/or avatarBase64.
- * Body: { solanaWallet, displayName?, avatarBase64?, teamName? }
+ * Update displayName, avatarBase64, teamName.
  */
 export async function PATCH(req: NextRequest) {
   const { solanaWallet, displayName, avatarBase64, teamName } =
@@ -160,22 +128,10 @@ export async function PATCH(req: NextRequest) {
     updates.displayName = String(displayName).slice(0, 30);
   if (avatarBase64 !== undefined) updates.avatarBase64 = avatarBase64;
 
-  // Update session and team name separately to avoid conditional spread in $transaction
-  // which causes Prisma type inference errors at build time
   const updatedSession = await prisma.userSession.update({
     where: { solanaWallet },
     data: updates,
-    include: {
-      team: {
-        select: {
-          id: true,
-          name: true,
-          logoSvg: true,
-          jerseyColor: true,
-          budget: true,
-        },
-      },
-    },
+    include: SESSION_INCLUDE,
   });
 
   if (teamName) {
@@ -183,7 +139,6 @@ export async function PATCH(req: NextRequest) {
       where: { id: session.teamId },
       data: { name: String(teamName).slice(0, 40) },
     });
-    // Reflect updated team name in response
     updatedSession.team.name = String(teamName).slice(0, 40);
   }
 

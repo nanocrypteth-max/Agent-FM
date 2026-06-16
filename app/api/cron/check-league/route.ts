@@ -1,205 +1,189 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { GoogleGenerativeAI } from "@google/generative-ai";
-import { generatePlayerAvatar } from "@/lib/svg/generateAvatar";
+import { generateAITeam } from "@/lib/team-generator/generateTeam";
 import { generateClubLogo } from "@/lib/svg/generateLogo";
 
-// Force dynamic rendering — this route queries the DB
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY ?? "");
 
-// Vercel Cron will call this every hour
-// Config in vercel.json: { "crons": [{ "path": "/api/cron/check-league", "schedule": "0 * * * *" }] }
+/**
+ * GET /api/cron/check-league
+ * Runs daily (Vercel Hobby: 0 0 * * *).
+ * Checks ALL active leagues — for each one where all fixtures are SIMULATED,
+ * creates a new season for that league's user.
+ */
 export async function GET(req: NextRequest) {
-  // Verify cron secret to prevent unauthorized calls
   const authHeader = req.headers.get("authorization");
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const activeLeague = await prisma.league.findFirst({
+  // Get all active leagues where all fixtures are simulated
+  const activeLeagues = await prisma.league.findMany({
     where: { status: "ACTIVE" },
-    include: {
-      fixtures: { select: { status: true } },
-    },
-    orderBy: { createdAt: "desc" },
+    include: { fixtures: { select: { status: true } }, teams: true },
   });
 
-  if (!activeLeague) {
-    return NextResponse.json({ message: "No active league found" });
-  }
+  const results: string[] = [];
 
-  const totalFixtures = activeLeague.fixtures.length;
-  const simulatedFixtures = activeLeague.fixtures.filter(
-    (f) => f.status === "SIMULATED",
-  ).length;
+  for (const league of activeLeagues) {
+    const total = league.fixtures.length;
+    const simulated = league.fixtures.filter(
+      (f) => f.status === "SIMULATED",
+    ).length;
 
-  // Only proceed if all fixtures are done (or no fixtures exist on brand new league)
-  if (totalFixtures > 0 && simulatedFixtures < totalFixtures) {
-    return NextResponse.json({
-      message: "League still in progress",
-      progress: `${simulatedFixtures}/${totalFixtures}`,
-    });
-  }
+    if (total === 0 || simulated < total) {
+      results.push(`SKIP ${league.id}: ${simulated}/${total} fixtures done`);
+      continue;
+    }
 
-  // Mark current league as completed
-  if (totalFixtures > 0) {
+    // Mark completed and create new season
     await prisma.league.update({
-      where: { id: activeLeague.id },
+      where: { id: league.id },
       data: { status: "COMPLETED", endsAt: new Date() },
     });
-  }
 
-  // Generate new league name + trophy via AI
-  const { leagueName, trophyName } = await generateLeagueNames();
-
-  // Create new league with same teams (new season)
-  const newSeason = activeLeague.season + 1;
-  const newLeague = await prisma.league.create({
-    data: { name: leagueName, trophyName, season: newSeason, status: "ACTIVE" },
-  });
-
-  // Clone teams (reset tactics, keep players)
-  const oldTeams = await prisma.team.findMany({
-    where: { leagueId: activeLeague.id },
-    include: { players: true },
-  });
-
-  for (const oldTeam of oldTeams) {
-    await prisma.team.create({
+    const newLeague = await prisma.league.create({
       data: {
-        name: oldTeam.name,
-        leagueId: newLeague.id,
-        isUserControlled: oldTeam.isUserControlled,
-        jerseyColor: oldTeam.jerseyColor,
-        logoSvg: oldTeam.logoSvg,
-        overallAtk: oldTeam.overallAtk,
-        overallMid: oldTeam.overallMid,
-        overallDef: oldTeam.overallDef,
-        budget: oldTeam.budget,
-        formation: oldTeam.formation,
-        players: {
-          create: oldTeam.players.map((p) => ({
-            name: p.name,
-            position: p.position,
-            age: p.age + 1,
-            nationality: p.nationality,
-            pace: Math.max(30, p.pace - 1),
-            shooting: p.shooting,
-            passing: p.passing,
-            defending: p.defending,
-            stamina: Math.max(30, p.stamina - 1),
-            starRating: p.starRating,
-            marketValue: p.marketValue,
-            avatarSvg: p.avatarSvg,
-            fitness: 100,
-            morale: 75,
-            isInUserSquad: p.isInUserSquad,
-          })),
-        },
+        name: league.name,
+        trophyName: league.trophyName,
+        season: league.season + 1,
+        status: "ACTIVE",
       },
     });
-  }
 
-  // Generate fixtures for new league
-  const newTeams = await prisma.team.findMany({
-    where: { leagueId: newLeague.id },
-  });
-  const roundRobin = generateRoundRobin(newTeams.map((t) => t.id));
-  const fixturesData = roundRobin.flatMap((round, ri) =>
-    round.map(([home, away]) => ({
-      leagueId: newLeague.id,
-      round: ri + 1,
-      homeTeamId: home,
-      awayTeamId: away,
-    })),
-  );
-  await prisma.fixture.createMany({ data: fixturesData });
+    // Clone teams into new league (age players +1, slight stamina decay)
+    const userTeam = league.teams.find((t) => t.isUserControlled);
+    const newTeamIds: string[] = [];
 
-  // Portal announcement
-  await prisma.portalMessage.create({
-    data: {
-      type: "LEAGUE",
-      title: `🏆 New Tournament: ${leagueName}`,
-      content: `Season ${newSeason} begins! The ${trophyName} is up for grabs. ${fixturesData.length} fixtures have been scheduled across ${roundRobin.length} matchdays. May the best manager win.`,
-      metadata: { leagueId: newLeague.id, trophyName, season: newSeason },
-    },
-  });
+    for (const oldTeam of league.teams) {
+      const oldPlayers = await prisma.player.findMany({
+        where: { teamId: oldTeam.id },
+      });
 
-  return NextResponse.json({
-    success: true,
-    newLeague: {
-      id: newLeague.id,
-      name: leagueName,
-      trophyName,
-      season: newSeason,
-    },
-    fixtures: fixturesData.length,
-  });
-}
+      const isAI = !oldTeam.isUserControlled;
+      let logoSvg = oldTeam.logoSvg;
+      let jerseyColor = oldTeam.jerseyColor;
 
-async function generateLeagueNames(): Promise<{
-  leagueName: string;
-  trophyName: string;
-}> {
-  const fallbacks = [
-    {
-      leagueName: "Elite World Championship",
-      trophyName: "The Golden Globe Trophy",
-    },
-    { leagueName: "Continental Masters League", trophyName: "The Diamond Cup" },
-    {
-      leagueName: "World Stage Invitational",
-      trophyName: "The Platinum Shield",
-    },
-    {
-      leagueName: "Grand Prix Football League",
-      trophyName: "The Champions Chalice",
-    },
-  ];
+      // Refresh AI team logo if needed
+      if (isAI && !logoSvg) {
+        const gen = generateAITeam(newLeague.id, league.teams.indexOf(oldTeam));
+        logoSvg = gen.logoSvg;
+        jerseyColor = gen.jerseyColor;
+      }
 
-  if (
-    !process.env.GEMINI_API_KEY ||
-    process.env.GEMINI_API_KEY === "your-gemini-api-key-here"
-  ) {
-    return fallbacks[Math.floor(Math.random() * fallbacks.length)];
-  }
+      const newTeam = await prisma.team.create({
+        data: {
+          name: oldTeam.name,
+          leagueId: newLeague.id,
+          isUserControlled: oldTeam.isUserControlled,
+          jerseyColor: jerseyColor ?? "#ff5252",
+          logoSvg,
+          overallAtk: oldTeam.overallAtk,
+          overallMid: oldTeam.overallMid,
+          overallDef: oldTeam.overallDef,
+          budget: oldTeam.budget,
+          formation: oldTeam.formation,
+          players: {
+            create: oldPlayers.map((p) => ({
+              name: p.name,
+              position: p.position,
+              age: p.age + 1,
+              nationality: p.nationality,
+              pace: Math.max(30, p.pace - 1),
+              shooting: p.shooting,
+              passing: p.passing,
+              defending: p.defending,
+              stamina: Math.max(30, p.stamina - 1),
+              starRating: p.starRating,
+              marketValue: p.marketValue,
+              avatarSvg: p.avatarSvg,
+              fitness: 100,
+              morale: 75,
+              isInUserSquad: p.isInUserSquad,
+            })),
+          },
+        },
+      });
+      newTeamIds.push(newTeam.id);
+    }
 
-  try {
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-    const result = await model.generateContent(
-      `Generate a unique, exciting football league name and trophy name for a high-stakes World Stage 2026 tournament.
-       Make it sound prestigious and epic. Respond ONLY with JSON (no markdown):
-       {"leagueName": "...", "trophyName": "..."}`,
+    // Update user session to point to new team
+    if (userTeam) {
+      const newUserTeam = await prisma.team.findFirst({
+        where: { leagueId: newLeague.id, isUserControlled: true },
+      });
+      if (newUserTeam) {
+        await prisma.userSession.updateMany({
+          where: { teamId: userTeam.id },
+          data: { teamId: newUserTeam.id },
+        });
+      }
+    }
+
+    // Generate fixtures for new season
+    const newTeams = await prisma.team.findMany({
+      where: { leagueId: newLeague.id },
+      select: { id: true },
+    });
+    const fixtures = generateRoundRobin(
+      newTeams.map((t) => t.id),
+      newLeague.id,
     );
-    const text = result.response
-      .text()
-      .replace(/```json|```/g, "")
-      .trim();
-    return JSON.parse(text);
-  } catch {
-    return fallbacks[Math.floor(Math.random() * fallbacks.length)];
+    await prisma.fixture.createMany({ data: fixtures });
+
+    // Portal notification
+    await prisma.portalMessage.create({
+      data: {
+        type: "LEAGUE",
+        title: `Season ${newLeague.season} Begins!`,
+        content: `A new season of ${newLeague.name} has started. The ${newLeague.trophyName} is up for grabs. ${fixtures.length} fixtures scheduled.`,
+        metadata: { leagueId: newLeague.id, season: newLeague.season },
+      },
+    });
+
+    results.push(
+      `NEW SEASON: ${newLeague.name} S${newLeague.season} (${fixtures.length} fixtures)`,
+    );
   }
+
+  return NextResponse.json({ processed: activeLeagues.length, results });
 }
 
-function generateRoundRobin(teamIds: string[]): Array<Array<[string, string]>> {
+function generateRoundRobin(
+  teamIds: string[],
+  leagueId: string,
+): Array<{
+  leagueId: string;
+  round: number;
+  homeTeamId: string;
+  awayTeamId: string;
+}> {
   const ids = [...teamIds];
   if (ids.length % 2 !== 0) ids.push("__BYE__");
   const n = ids.length;
-  const rounds: Array<Array<[string, string]>> = [];
+  const fixtures: Array<{
+    leagueId: string;
+    round: number;
+    homeTeamId: string;
+    awayTeamId: string;
+  }> = [];
   let arr = [...ids];
+
   for (let r = 0; r < n - 1; r++) {
-    const round: Array<[string, string]> = [];
     for (let i = 0; i < n / 2; i++) {
-      const home = arr[i],
-        away = arr[n - 1 - i];
+      const home = arr[i];
+      const away = arr[n - 1 - i];
       if (home !== "__BYE__" && away !== "__BYE__") {
-        round.push(r % 2 === 0 ? [home, away] : [away, home]);
+        fixtures.push({
+          leagueId,
+          round: r + 1,
+          homeTeamId: r % 2 === 0 ? home : away,
+          awayTeamId: r % 2 === 0 ? away : home,
+        });
       }
     }
-    rounds.push(round);
     arr = [arr[0], arr[n - 1], ...arr.slice(1, n - 1)];
   }
-  return rounds;
+  return fixtures;
 }

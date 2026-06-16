@@ -1,19 +1,42 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
-// Force dynamic rendering — this route queries the DB and cannot be statically generated
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 /**
- * Returns the active league.
- * Also performs a lazy check: if all fixtures in the active league are
- * SIMULATED, triggers the cron endpoint in the background to create the
- * next league. This ensures progression even on Vercel Hobby (daily cron only).
+ * GET /api/leagues/default?wallet=<address>
+ * Returns the active league belonging to this wallet's team.
+ * Falls back to the most recent active league if no wallet provided.
  */
-export async function GET(req: Request) {
+export async function GET(req: NextRequest) {
+  const wallet = new URL(req.url).searchParams.get("wallet");
+
+  let leagueId: string | null = null;
+
+  if (wallet) {
+    // Find the league that contains this user's team
+    const session = await prisma.userSession.findUnique({
+      where: { solanaWallet: wallet },
+      select: { teamId: true },
+    });
+
+    if (session) {
+      const team = await prisma.team.findUnique({
+        where: { id: session.teamId },
+        select: { leagueId: true },
+      });
+      leagueId = team?.leagueId ?? null;
+    }
+  }
+
+  // Build query
+  const whereClause = leagueId
+    ? { id: leagueId }
+    : { status: "ACTIVE" as const };
+
   const league = await prisma.league.findFirst({
-    where: { status: "ACTIVE" },
+    where: whereClause,
     orderBy: { createdAt: "desc" },
     include: {
       fixtures: {
@@ -28,13 +51,12 @@ export async function GET(req: Request) {
 
   if (!league) {
     return NextResponse.json(
-      { error: "No league found. Run `npm run db:seed` first." },
+      { error: "No league found. Please connect your wallet first." },
       { status: 404 },
     );
   }
 
-  // Lazy progression check: if all fixtures are done, trigger next league
-  // in the background (non-blocking — response returns immediately)
+  // Lazy progression: if all fixtures done, trigger next season
   const total = league.fixtures.length;
   const simulated = league.fixtures.filter(
     (f) => f.status === "SIMULATED",
@@ -42,17 +64,13 @@ export async function GET(req: Request) {
 
   if (total > 0 && simulated === total) {
     const cronSecret = process.env.CRON_SECRET;
-    const baseUrl = req.headers.get("host")
-      ? `https://${req.headers.get("host")}`
-      : "http://localhost:3000";
+    const host = req.headers.get("host") ?? "localhost:3000";
+    const protocol = host.includes("localhost") ? "http" : "https";
 
-    // Fire-and-forget — don't await, don't block the response
-    fetch(`${baseUrl}/api/cron/check-league`, {
+    fetch(`${protocol}://${host}/api/cron/check-league`, {
       method: "GET",
-      headers: {
-        authorization: `Bearer ${cronSecret}`,
-      },
-    }).catch(() => {}); // silent fail — cron will retry tomorrow anyway
+      headers: { authorization: `Bearer ${cronSecret}` },
+    }).catch(() => {});
   }
 
   return NextResponse.json(league);

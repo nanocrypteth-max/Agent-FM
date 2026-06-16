@@ -32,7 +32,7 @@ interface TableRow {
 }
 
 export default function HomePage() {
-  const { connected, ready } = useAuth();
+  const { connected, ready, walletAddress } = useAuth();
   const subtleHover = useHoverSound("subtle");
   const [fixtures, setFixtures] = useState<Fixture[]>([]);
   const [table, setTable] = useState<TableRow[]>([]);
@@ -58,7 +58,9 @@ export default function HomePage() {
     setLoading(true);
     setError(null);
     try {
-      const leagueRes = await fetch("/api/leagues/default");
+      const leagueRes = await fetch(
+        `/api/leagues/default?wallet=${walletAddress}`,
+      );
       if (!leagueRes.ok) {
         const data = await leagueRes.json();
         throw new Error(data.error ?? "Failed to load league");
