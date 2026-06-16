@@ -4,6 +4,9 @@ import { prisma } from "@/lib/prisma";
 import { generatePlayerAvatar } from "@/lib/svg/generateAvatar";
 import { generateClubLogo } from "@/lib/svg/generateLogo";
 
+// Force dynamic rendering — this route queries the DB
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 const Schema = z.object({
   txHash: z.string().regex(/^0x[a-fA-F0-9]{64}$/),
   tier: z.enum(["STANDARD", "PREMIUM"]),
@@ -11,16 +14,39 @@ const Schema = z.object({
 });
 
 const POSITION_LIST = ["GK", "DF", "MF", "FW"] as const;
-const FIRST_NAMES = ["Zara","Rio","Kai","Nova","Axel","Cruz","Zion","Vale","Rex","Sora"];
-const LAST_NAMES = ["Storm","Vega","Blaze","Frost","Cruz","Nova","Stone","Vale","Ryder","Fox"];
+const FIRST_NAMES = [
+  "Zara",
+  "Rio",
+  "Kai",
+  "Nova",
+  "Axel",
+  "Cruz",
+  "Zion",
+  "Vale",
+  "Rex",
+  "Sora",
+];
+const LAST_NAMES = [
+  "Storm",
+  "Vega",
+  "Blaze",
+  "Frost",
+  "Cruz",
+  "Nova",
+  "Stone",
+  "Vale",
+  "Ryder",
+  "Fox",
+];
 
 function mulberry32(seed: number): () => number {
   let s = seed;
   return () => {
-    s |= 0; s = s + 0x6d2b79f5 | 0;
-    let t = Math.imul(s ^ s >>> 15, 1 | s);
-    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
-    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    s |= 0;
+    s = (s + 0x6d2b79f5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
 
@@ -49,8 +75,11 @@ export async function POST(req: NextRequest) {
   // TODO: In production, verify tx on-chain via provider.getTransactionReceipt()
   // For now, trust the client (acceptable for testnet MVP)
 
-  const userTeam = await prisma.team.findFirst({ where: { isUserControlled: true } });
-  if (!userTeam) return NextResponse.json({ error: "User team not found" }, { status: 400 });
+  const userTeam = await prisma.team.findFirst({
+    where: { isUserControlled: true },
+  });
+  if (!userTeam)
+    return NextResponse.json({ error: "User team not found" }, { status: 400 });
 
   // Generate star rating for tier
   const seed = parseInt(txHash.slice(2, 10), 16);
@@ -78,28 +107,45 @@ export async function POST(req: NextRequest) {
     pace: attr(baseAttr, 12, rng),
     shooting: attr(position === "FW" ? baseAttr + 10 : baseAttr - 10, 12, rng),
     passing: attr(position === "MF" ? baseAttr + 10 : baseAttr, 12, rng),
-    defending: attr(position === "DF" || position === "GK" ? baseAttr + 10 : baseAttr - 15, 10, rng),
+    defending: attr(
+      position === "DF" || position === "GK" ? baseAttr + 10 : baseAttr - 15,
+      10,
+      rng,
+    ),
     stamina: attr(baseAttr, 12, rng),
   };
 
   const marketValue = [50000, 150000, 400000, 1000000, 3000000][starRating - 1];
-  const avatarSvg = generatePlayerAvatar({ name, position, jerseyColor: userTeam.jerseyColor, starRating });
+  const avatarSvg = generatePlayerAvatar({
+    name,
+    position,
+    jerseyColor: userTeam.jerseyColor,
+    starRating,
+  });
 
   const spin = await prisma.$transaction(async (tx) => {
     // Create player
     const player = await tx.player.create({
       data: {
-        name, position, age: 20 + Math.floor(rng() * 10),
+        name,
+        position,
+        age: 20 + Math.floor(rng() * 10),
         nationality: "International",
-        ...attrs, starRating, marketValue, avatarSvg,
-        fitness: 100, morale: 90,
+        ...attrs,
+        starRating,
+        marketValue,
+        avatarSvg,
+        fitness: 100,
+        morale: 90,
         teamId: userTeam.id,
         isInUserSquad: true,
       },
     });
 
     // Add to user squad (bench by default)
-    await tx.userSquad.create({ data: { playerId: player.id, slotIndex: null } });
+    await tx.userSquad.create({
+      data: { playerId: player.id, slotIndex: null },
+    });
 
     // Log transfer
     await tx.transferLog.create({
@@ -114,7 +160,13 @@ export async function POST(req: NextRequest) {
     // Record spin
     const spinRecord = await tx.gachaSpin.upsert({
       where: { txHash },
-      create: { walletAddr, tier, txHash, playerId: player.id, status: "COMPLETED" },
+      create: {
+        walletAddr,
+        tier,
+        txHash,
+        playerId: player.id,
+        status: "COMPLETED",
+      },
       update: { playerId: player.id, status: "COMPLETED" },
     });
 

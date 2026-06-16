@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
+// Force dynamic rendering — this route queries the DB
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
 interface TeamRow {
   teamId: string;
   teamName: string;
@@ -13,14 +17,22 @@ interface TeamRow {
   points: number;
 }
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(
+  req: NextRequest,
+  { params }: { params: { id: string } },
+) {
   const league = await prisma.league.findUnique({
     where: { id: params.id },
     include: {
       teams: { select: { id: true, name: true, isUserControlled: true } },
       fixtures: {
         where: { status: "SIMULATED" },
-        select: { homeTeamId: true, awayTeamId: true, homeScore: true, awayScore: true },
+        select: {
+          homeTeamId: true,
+          awayTeamId: true,
+          homeScore: true,
+          awayScore: true,
+        },
       },
     },
   });

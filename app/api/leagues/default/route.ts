@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
+// Force dynamic rendering — this route queries the DB and cannot be statically generated
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
 /**
  * Returns the active league.
  * Also performs a lazy check: if all fixtures in the active league are

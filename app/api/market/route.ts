@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
+// Force dynamic rendering — this route queries the DB
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const position = searchParams.get("position");
@@ -18,12 +22,26 @@ export async function GET(req: NextRequest) {
     include: {
       player: {
         select: {
-          id: true, name: true, position: true, age: true, nationality: true,
-          pace: true, shooting: true, passing: true, defending: true, stamina: true,
-          starRating: true, marketValue: true, avatarSvg: true, fitness: true, morale: true,
+          id: true,
+          name: true,
+          position: true,
+          age: true,
+          nationality: true,
+          pace: true,
+          shooting: true,
+          passing: true,
+          defending: true,
+          stamina: true,
+          starRating: true,
+          marketValue: true,
+          avatarSvg: true,
+          fitness: true,
+          morale: true,
         },
       },
-      fromTeam: { select: { id: true, name: true, logoSvg: true, jerseyColor: true } },
+      fromTeam: {
+        select: { id: true, name: true, logoSvg: true, jerseyColor: true },
+      },
     },
     orderBy: { listedAt: "desc" },
     take: 50,

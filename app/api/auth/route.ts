@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
+// Force dynamic rendering — this route queries the DB
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
 const SESSION_INCLUDE = {
   team: {
     select: {

@@ -4,6 +4,9 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { generatePlayerAvatar } from "@/lib/svg/generateAvatar";
 import { generateClubLogo } from "@/lib/svg/generateLogo";
 
+// Force dynamic rendering — this route queries the DB
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY ?? "");
 
 // Vercel Cron will call this every hour
@@ -28,7 +31,9 @@ export async function GET(req: NextRequest) {
   }
 
   const totalFixtures = activeLeague.fixtures.length;
-  const simulatedFixtures = activeLeague.fixtures.filter((f) => f.status === "SIMULATED").length;
+  const simulatedFixtures = activeLeague.fixtures.filter(
+    (f) => f.status === "SIMULATED",
+  ).length;
 
   // Only proceed if all fixtures are done (or no fixtures exist on brand new league)
   if (totalFixtures > 0 && simulatedFixtures < totalFixtures) {
@@ -76,16 +81,20 @@ export async function GET(req: NextRequest) {
         formation: oldTeam.formation,
         players: {
           create: oldTeam.players.map((p) => ({
-            name: p.name, position: p.position, age: p.age + 1,
+            name: p.name,
+            position: p.position,
+            age: p.age + 1,
             nationality: p.nationality,
             pace: Math.max(30, p.pace - 1),
-            shooting: p.shooting, passing: p.passing,
+            shooting: p.shooting,
+            passing: p.passing,
             defending: p.defending,
             stamina: Math.max(30, p.stamina - 1),
             starRating: p.starRating,
             marketValue: p.marketValue,
             avatarSvg: p.avatarSvg,
-            fitness: 100, morale: 75,
+            fitness: 100,
+            morale: 75,
             isInUserSquad: p.isInUserSquad,
           })),
         },
@@ -94,7 +103,9 @@ export async function GET(req: NextRequest) {
   }
 
   // Generate fixtures for new league
-  const newTeams = await prisma.team.findMany({ where: { leagueId: newLeague.id } });
+  const newTeams = await prisma.team.findMany({
+    where: { leagueId: newLeague.id },
+  });
   const roundRobin = generateRoundRobin(newTeams.map((t) => t.id));
   const fixturesData = roundRobin.flatMap((round, ri) =>
     round.map(([home, away]) => ({
@@ -102,7 +113,7 @@ export async function GET(req: NextRequest) {
       round: ri + 1,
       homeTeamId: home,
       awayTeamId: away,
-    }))
+    })),
   );
   await prisma.fixture.createMany({ data: fixturesData });
 
@@ -118,20 +129,40 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     success: true,
-    newLeague: { id: newLeague.id, name: leagueName, trophyName, season: newSeason },
+    newLeague: {
+      id: newLeague.id,
+      name: leagueName,
+      trophyName,
+      season: newSeason,
+    },
     fixtures: fixturesData.length,
   });
 }
 
-async function generateLeagueNames(): Promise<{ leagueName: string; trophyName: string }> {
+async function generateLeagueNames(): Promise<{
+  leagueName: string;
+  trophyName: string;
+}> {
   const fallbacks = [
-    { leagueName: "Elite World Championship", trophyName: "The Golden Globe Trophy" },
+    {
+      leagueName: "Elite World Championship",
+      trophyName: "The Golden Globe Trophy",
+    },
     { leagueName: "Continental Masters League", trophyName: "The Diamond Cup" },
-    { leagueName: "World Stage Invitational", trophyName: "The Platinum Shield" },
-    { leagueName: "Grand Prix Football League", trophyName: "The Champions Chalice" },
+    {
+      leagueName: "World Stage Invitational",
+      trophyName: "The Platinum Shield",
+    },
+    {
+      leagueName: "Grand Prix Football League",
+      trophyName: "The Champions Chalice",
+    },
   ];
 
-  if (!process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY === "your-gemini-api-key-here") {
+  if (
+    !process.env.GEMINI_API_KEY ||
+    process.env.GEMINI_API_KEY === "your-gemini-api-key-here"
+  ) {
     return fallbacks[Math.floor(Math.random() * fallbacks.length)];
   }
 
@@ -140,9 +171,12 @@ async function generateLeagueNames(): Promise<{ leagueName: string; trophyName: 
     const result = await model.generateContent(
       `Generate a unique, exciting football league name and trophy name for a high-stakes World Stage 2026 tournament.
        Make it sound prestigious and epic. Respond ONLY with JSON (no markdown):
-       {"leagueName": "...", "trophyName": "..."}`
+       {"leagueName": "...", "trophyName": "..."}`,
     );
-    const text = result.response.text().replace(/```json|```/g, "").trim();
+    const text = result.response
+      .text()
+      .replace(/```json|```/g, "")
+      .trim();
     return JSON.parse(text);
   } catch {
     return fallbacks[Math.floor(Math.random() * fallbacks.length)];
@@ -158,7 +192,8 @@ function generateRoundRobin(teamIds: string[]): Array<Array<[string, string]>> {
   for (let r = 0; r < n - 1; r++) {
     const round: Array<[string, string]> = [];
     for (let i = 0; i < n / 2; i++) {
-      const home = arr[i], away = arr[n - 1 - i];
+      const home = arr[i],
+        away = arr[n - 1 - i];
       if (home !== "__BYE__" && away !== "__BYE__") {
         round.push(r % 2 === 0 ? [home, away] : [away, home]);
       }

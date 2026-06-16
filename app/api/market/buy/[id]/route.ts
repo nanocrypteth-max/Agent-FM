@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+// Force dynamic rendering — this route queries the DB
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
+export async function POST(
+  req: NextRequest,
+  { params }: { params: { id: string } },
+) {
   const listingId = params.id;
 
   const listing = await prisma.transferListing.findUnique({
@@ -13,17 +20,26 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   });
 
   if (!listing || listing.status !== "LISTED") {
-    return NextResponse.json({ error: "Listing not found or already sold" }, { status: 404 });
+    return NextResponse.json(
+      { error: "Listing not found or already sold" },
+      { status: 404 },
+    );
   }
 
   // Find user team
-  const userTeam = await prisma.team.findFirst({ where: { isUserControlled: true } });
-  if (!userTeam) return NextResponse.json({ error: "User team not found" }, { status: 400 });
+  const userTeam = await prisma.team.findFirst({
+    where: { isUserControlled: true },
+  });
+  if (!userTeam)
+    return NextResponse.json({ error: "User team not found" }, { status: 400 });
 
   if (userTeam.budget < listing.price) {
-    return NextResponse.json({
-      error: `Insufficient budget. Need £${listing.price.toLocaleString()}, have £${userTeam.budget.toLocaleString()}`,
-    }, { status: 400 });
+    return NextResponse.json(
+      {
+        error: `Insufficient budget. Need £${listing.price.toLocaleString()}, have £${userTeam.budget.toLocaleString()}`,
+      },
+      { status: 400 },
+    );
   }
 
   // Transaction: buy player

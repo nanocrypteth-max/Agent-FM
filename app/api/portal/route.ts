@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { generatePortalNews } from "@/lib/portal/generateNews";
 
+// Force dynamic rendering — this route queries the DB
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const page = parseInt(searchParams.get("page") ?? "1");
@@ -38,7 +41,10 @@ export async function PATCH(req: NextRequest) {
   const id = searchParams.get("id");
 
   if (id) {
-    await prisma.portalMessage.update({ where: { id }, data: { isRead: true } });
+    await prisma.portalMessage.update({
+      where: { id },
+      data: { isRead: true },
+    });
   } else {
     // Mark all as read
     await prisma.portalMessage.updateMany({ data: { isRead: true } });

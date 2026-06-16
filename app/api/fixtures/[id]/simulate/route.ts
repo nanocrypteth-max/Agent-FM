@@ -1,12 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { simulateMatch } from "@/lib/match-engine/simulate";
-import { generateTactics, toMatchEngineTactics, TacticsResult } from "@/lib/ai-agent/generate-tactics";
+import {
+  generateTactics,
+  toMatchEngineTactics,
+  TacticsResult,
+} from "@/lib/ai-agent/generate-tactics";
 import type { MatchSimInput, TeamMatchData } from "@/lib/match-engine/types";
 
+// Force dynamic rendering — this route queries the DB
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 const OVERALL_DIFF_THRESHOLD = 15;
 
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(
+  req: NextRequest,
+  { params }: { params: { id: string } },
+) {
   const fixtureId = params.id;
 
   const fixture = await prisma.fixture.findUnique({
@@ -24,8 +34,11 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   if (fixture.status === "SIMULATED" && fixture.matchResult) {
     return NextResponse.json(
-      { error: "Fixture already simulated", matchResultId: fixture.matchResult.id },
-      { status: 409 }
+      {
+        error: "Fixture already simulated",
+        matchResultId: fixture.matchResult.id,
+      },
+      { status: 409 },
     );
   }
 
@@ -33,16 +46,21 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const userTeam = fixture.homeTeam.isUserControlled
     ? fixture.homeTeam
     : fixture.awayTeam.isUserControlled
-    ? fixture.awayTeam
-    : null;
+      ? fixture.awayTeam
+      : null;
 
   let userTacticsRecord: { tactics: unknown } | null = null;
   if (userTeam) {
-    userTacticsRecord = await prisma.userTactics.findUnique({ where: { fixtureId } });
+    userTacticsRecord = await prisma.userTactics.findUnique({
+      where: { fixtureId },
+    });
     if (!userTacticsRecord) {
       return NextResponse.json(
-        { error: "Submit your tactics via POST /api/fixtures/:id/tactics before simulating" },
-        { status: 400 }
+        {
+          error:
+            "Submit your tactics via POST /api/fixtures/:id/tactics before simulating",
+        },
+        { status: 400 },
       );
     }
   }
@@ -85,8 +103,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   } catch (err) {
     // Most likely cause: invalid startingXI (e.g. wrong GK count) from user tactics
     return NextResponse.json(
-      { error: `Simulation failed: ${err instanceof Error ? err.message : "unknown error"}` },
-      { status: 400 }
+      {
+        error: `Simulation failed: ${err instanceof Error ? err.message : "unknown error"}`,
+      },
+      { status: 400 },
     );
   }
 
@@ -121,10 +141,15 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     // P2002 = unique constraint violation on MatchResult.fixtureId (race condition:
     // another request simulated this fixture between our check and this write)
     if (err.code === "P2002") {
-      const existing = await prisma.matchResult.findUnique({ where: { fixtureId } });
+      const existing = await prisma.matchResult.findUnique({
+        where: { fixtureId },
+      });
       return NextResponse.json(
-        { error: "Fixture already simulated (race condition)", matchResultId: existing?.id },
-        { status: 409 }
+        {
+          error: "Fixture already simulated (race condition)",
+          matchResultId: existing?.id,
+        },
+        { status: 409 },
       );
     }
     throw err;
@@ -161,7 +186,12 @@ async function getOrGenerateTactics(
     overallMid: number;
     overallDef: number;
   },
-  opponent: { name: string; overallAtk: number; overallMid: number; overallDef: number }
+  opponent: {
+    name: string;
+    overallAtk: number;
+    overallMid: number;
+    overallDef: number;
+  },
 ): Promise<TacticsResult> {
   const squad = team.players.map((p) => ({
     id: p.id,
@@ -174,8 +204,10 @@ async function getOrGenerateTactics(
     stamina: p.stamina,
   }));
 
-  const teamOverallAvg = (team.overallAtk + team.overallMid + team.overallDef) / 3;
-  const oppOverallAvg = (opponent.overallAtk + opponent.overallMid + opponent.overallDef) / 3;
+  const teamOverallAvg =
+    (team.overallAtk + team.overallMid + team.overallDef) / 3;
+  const oppOverallAvg =
+    (opponent.overallAtk + opponent.overallMid + opponent.overallDef) / 3;
   const overallDiff = Math.abs(teamOverallAvg - oppOverallAvg);
 
   if (overallDiff > OVERALL_DIFF_THRESHOLD) {
@@ -183,7 +215,11 @@ async function getOrGenerateTactics(
       teamName: team.name,
       squad,
       opponentName: opponent.name,
-      opponentOverall: { atk: opponent.overallAtk, mid: opponent.overallMid, def: opponent.overallDef },
+      opponentOverall: {
+        atk: opponent.overallAtk,
+        mid: opponent.overallMid,
+        def: opponent.overallDef,
+      },
       context: "MATCH_SPECIFIC",
     });
   }

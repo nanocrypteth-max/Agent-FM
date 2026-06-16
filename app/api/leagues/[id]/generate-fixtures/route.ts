@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+// Force dynamic rendering — this route queries the DB
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
+export async function POST(
+  req: NextRequest,
+  { params }: { params: { id: string } },
+) {
   const leagueId = params.id;
   const body = await req.json().catch(() => ({}));
   const doubleRound = body.doubleRound ?? false;
@@ -12,14 +19,17 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   });
 
   if (teams.length < 2) {
-    return NextResponse.json({ error: "League needs at least 2 teams" }, { status: 400 });
+    return NextResponse.json(
+      { error: "League needs at least 2 teams" },
+      { status: 400 },
+    );
   }
 
   const existingCount = await prisma.fixture.count({ where: { leagueId } });
   if (existingCount > 0) {
     return NextResponse.json(
       { error: "Fixtures already generated for this league", existingCount },
-      { status: 409 }
+      { status: 409 },
     );
   }
 
@@ -35,7 +45,12 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   rounds.forEach((round, roundIndex) => {
     round.forEach(([home, away]) => {
-      fixturesData.push({ leagueId, round: roundIndex + 1, homeTeamId: home, awayTeamId: away });
+      fixturesData.push({
+        leagueId,
+        round: roundIndex + 1,
+        homeTeamId: home,
+        awayTeamId: away,
+      });
     });
   });
 

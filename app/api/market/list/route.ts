@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 
+// Force dynamic rendering — this route queries the DB
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
 const Schema = z.object({
   playerId: z.string(),
   price: z.number().int().positive(),
@@ -17,12 +21,18 @@ export async function POST(req: NextRequest) {
 
   const { playerId, price } = parsed.data;
 
-  const userTeam = await prisma.team.findFirst({ where: { isUserControlled: true } });
-  if (!userTeam) return NextResponse.json({ error: "User team not found" }, { status: 400 });
+  const userTeam = await prisma.team.findFirst({
+    where: { isUserControlled: true },
+  });
+  if (!userTeam)
+    return NextResponse.json({ error: "User team not found" }, { status: 400 });
 
   const player = await prisma.player.findUnique({ where: { id: playerId } });
   if (!player || player.teamId !== userTeam.id) {
-    return NextResponse.json({ error: "Player not in your squad" }, { status: 403 });
+    return NextResponse.json(
+      { error: "Player not in your squad" },
+      { status: 403 },
+    );
   }
 
   // Check not already listed
@@ -30,7 +40,10 @@ export async function POST(req: NextRequest) {
     where: { playerId },
   });
   if (existing && existing.status === "LISTED") {
-    return NextResponse.json({ error: "Player already listed" }, { status: 409 });
+    return NextResponse.json(
+      { error: "Player already listed" },
+      { status: 409 },
+    );
   }
 
   const listing = await prisma.transferListing.upsert({
@@ -55,7 +68,8 @@ export async function POST(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const playerId = searchParams.get("playerId");
-  if (!playerId) return NextResponse.json({ error: "playerId required" }, { status: 400 });
+  if (!playerId)
+    return NextResponse.json({ error: "playerId required" }, { status: 400 });
 
   await prisma.transferListing.updateMany({
     where: { playerId, status: "LISTED" },
