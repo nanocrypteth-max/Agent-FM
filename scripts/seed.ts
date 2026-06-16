@@ -195,6 +195,7 @@ async function main() {
   await prisma.userTactics.deleteMany();
   await prisma.matchResult.deleteMany();
   await prisma.fixture.deleteMany();
+  await prisma.userSession.deleteMany(); // must be before team (FK: UserSession.teamId → Team.id)
   await prisma.player.deleteMany();
   await prisma.team.deleteMany();
   await prisma.league.deleteMany();
