@@ -108,88 +108,46 @@ export default function LandingPage() {
           club and start your managerial career.
         </p>
 
-        {/* CTA Button */}
-        {!isPhantomInstalled ? (
-          <div
+        {/* CTA Button — Privy handles wallet selection (Phantom, email, etc) */}
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 12,
+          }}
+        >
+          <button
+            onClick={login}
+            disabled={loading}
+            {...ctaHover}
             style={{
-              display: "flex",
-              flexDirection: "column",
+              display: "inline-flex",
               alignItems: "center",
               gap: 12,
+              padding: "16px 44px",
+              borderRadius: 10,
+              border: "none",
+              background: loading
+                ? "var(--border)"
+                : "linear-gradient(135deg, var(--ws-gold), #e6b800)",
+              color: loading ? "var(--ink-dim)" : "#0a0d12",
+              fontFamily: "var(--display)",
+              fontWeight: 700,
+              fontSize: 16,
+              textTransform: "uppercase",
+              letterSpacing: 1.5,
+              cursor: loading ? "not-allowed" : "pointer",
+              boxShadow: loading ? "none" : "0 0 40px rgba(255,215,0,0.3)",
             }}
           >
-            <a
-              href="https://phantom.app"
-              target="_blank"
-              rel="noopener noreferrer"
-              {...ctaHover}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 10,
-                padding: "16px 36px",
-                borderRadius: 10,
-                background: "linear-gradient(135deg, #ab9ff2, #7c5cbf)",
-                color: "#fff",
-                textDecoration: "none",
-                fontFamily: "var(--display)",
-                fontWeight: 700,
-                fontSize: 16,
-                textTransform: "uppercase",
-                letterSpacing: 1.5,
-                boxShadow: "0 0 32px rgba(171,159,242,0.35)",
-                transition: "transform 0.15s, box-shadow 0.15s",
-              }}
-            >
-              <span style={{ fontSize: 22 }}>👻</span>
-              Install Phantom Wallet
-            </a>
-            <p style={{ fontSize: 12, color: "var(--ink-dim)" }}>
-              Phantom is a free Solana wallet browser extension
-            </p>
-          </div>
-        ) : (
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: 12,
-            }}
-          >
-            <button
-              onClick={login}
-              disabled={loading}
-              {...ctaHover}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 12,
-                padding: "16px 44px",
-                borderRadius: 10,
-                border: "none",
-                background: loading
-                  ? "var(--border)"
-                  : "linear-gradient(135deg, var(--ws-gold), #e6b800)",
-                color: loading ? "var(--ink-dim)" : "#0a0d12",
-                fontFamily: "var(--display)",
-                fontWeight: 700,
-                fontSize: 16,
-                textTransform: "uppercase",
-                letterSpacing: 1.5,
-                cursor: loading ? "not-allowed" : "pointer",
-                boxShadow: loading ? "none" : "0 0 40px rgba(255,215,0,0.3)",
-                transition: "transform 0.15s, box-shadow 0.15s",
-              }}
-            >
-              <span style={{ fontSize: 22 }}>👻</span>
-              {loading ? "Connecting..." : "Connect Phantom Wallet"}
-            </button>
-            <p style={{ fontSize: 12, color: "var(--ink-dim)" }}>
-              Your wallet address = your permanent club identity
-            </p>
-          </div>
-        )}
+            <span style={{ fontSize: 22 }}>🏆</span>
+            {loading ? "Connecting..." : "Connect Wallet / Login"}
+          </button>
+          <p style={{ fontSize: 12, color: "var(--ink-dim)" }}>
+            Connect with Phantom, Solflare, or login with Email
+          </p>
+        </div>
 
         {error && (
           <div
