@@ -1,5 +1,6 @@
 import "./globals.css";
 import Navbar from "@/components/ui/Navbar";
+import PrivyProvider from "@/components/auth/PrivyProvider";
 import { APP_NAME, APP_DESCRIPTION } from "@/lib/config";
 
 export const metadata = {
@@ -25,8 +26,10 @@ export default function RootLayout({
           <div className="ws-ball ws-ball-4" />
           <div className="ws-ball ws-ball-5" />
         </div>
-        <Navbar />
-        <main style={{ paddingTop: "64px" }}>{children}</main>
+        <PrivyProvider>
+          <Navbar />
+          <main style={{ paddingTop: "64px" }}>{children}</main>
+        </PrivyProvider>
       </body>
     </html>
   );

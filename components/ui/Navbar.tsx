@@ -10,7 +10,9 @@ import { APP_NAME, APP_TAGLINE } from "@/lib/config";
 const NAV_ITEMS = [
   { href: "/", label: "League", icon: "🏆" },
   { href: "/squad", label: "Squad", icon: "⚽" },
+  { href: "/train", label: "Train", icon: "💪" },
   { href: "/market", label: "Market", icon: "💰" },
+  { href: "/friendly", label: "Friendly", icon: "🤝" },
   { href: "/portal", label: "Portal", icon: "📨" },
   { href: "/gacha", label: "Spin", icon: "🎰" },
 ];
@@ -45,7 +47,6 @@ export default function Navbar() {
           </div>
         )}
 
-        {/* Wallet button always visible, right side */}
         <div style={{ marginLeft: "auto" }}>
           <WalletButton />
         </div>

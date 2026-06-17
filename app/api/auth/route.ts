@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { createLeagueForWallet } from "@/lib/team-generator/generateLeague";
+import { levelFromExp } from "@/lib/exp/manager";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -17,13 +18,8 @@ const SESSION_INCLUDE = {
   },
 } as const;
 
-/**
- * POST /api/auth
- * Connect wallet → get or create session + league.
- * Each wallet gets its own unique team and league vs 7 AI teams.
- */
 export async function POST(req: NextRequest) {
-  const { solanaWallet } = await req.json();
+  const { solanaWallet, privyUserId } = await req.json();
 
   if (!solanaWallet || typeof solanaWallet !== "string") {
     return NextResponse.json(
@@ -32,38 +28,43 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(solanaWallet)) {
-    return NextResponse.json(
-      { error: "Invalid Solana wallet address" },
-      { status: 400 },
-    );
-  }
-
-  // Fast path: returning user
-  const existing = await prisma.userSession.findUnique({
-    where: { solanaWallet },
+  // Returning user — find by wallet OR by privyUserId
+  const existing = await prisma.userSession.findFirst({
+    where: {
+      OR: [{ solanaWallet }, ...(privyUserId ? [{ privyUserId }] : [])],
+    },
     include: SESSION_INCLUDE,
   });
 
   if (existing) {
-    prisma.userSession
-      .update({ where: { id: existing.id }, data: { lastSeenAt: new Date() } })
-      .catch(() => {});
+    // Update lastSeen and link privyUserId if not set
+    await prisma.userSession.update({
+      where: { id: existing.id },
+      data: {
+        lastSeenAt: new Date(),
+        ...(privyUserId && !existing.privyUserId ? { privyUserId } : {}),
+        // Sync wallet if changed (embedded wallet rotation)
+        ...(existing.solanaWallet !== solanaWallet ? { solanaWallet } : {}),
+      },
+    });
     return NextResponse.json({ session: existing, isNew: false });
   }
 
-  // New wallet — generate a full league (1 user team + 7 AI + fixtures)
+  // New user — generate league + team
   try {
     const userTeamId = await createLeagueForWallet(solanaWallet);
 
     const session = await prisma.userSession.create({
-      data: { solanaWallet, teamId: userTeamId },
+      data: {
+        solanaWallet,
+        privyUserId: privyUserId ?? null,
+        teamId: userTeamId,
+      },
       include: SESSION_INCLUDE,
     });
 
     return NextResponse.json({ session, isNew: true });
   } catch (err: any) {
-    // P2002: race condition (two requests for same wallet simultaneously)
     if (err?.code === "P2002") {
       const session = await prisma.userSession.findUnique({
         where: { solanaWallet },
@@ -71,17 +72,14 @@ export async function POST(req: NextRequest) {
       });
       if (session) return NextResponse.json({ session, isNew: false });
     }
-    console.error("[auth] Failed to create session:", err);
+    console.error("[auth] create session error:", err);
     return NextResponse.json(
-      { error: "Failed to initialize your club. Please try again." },
+      { error: "Failed to initialize club. Try again." },
       { status: 500 },
     );
   }
 }
 
-/**
- * GET /api/auth?wallet=<address>
- */
 export async function GET(req: NextRequest) {
   const wallet = new URL(req.url).searchParams.get("wallet");
   if (!wallet) return NextResponse.json({ session: null });
@@ -90,14 +88,9 @@ export async function GET(req: NextRequest) {
     where: { solanaWallet: wallet },
     include: SESSION_INCLUDE,
   });
-
   return NextResponse.json({ session });
 }
 
-/**
- * PATCH /api/auth
- * Update displayName, avatarBase64, teamName.
- */
 export async function PATCH(req: NextRequest) {
   const { solanaWallet, displayName, avatarBase64, teamName } =
     await req.json();
@@ -112,9 +105,8 @@ export async function PATCH(req: NextRequest) {
   const session = await prisma.userSession.findUnique({
     where: { solanaWallet },
   });
-  if (!session) {
+  if (!session)
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
-  }
 
   if (avatarBase64 && avatarBase64.length > 2_800_000) {
     return NextResponse.json(
