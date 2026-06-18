@@ -10,10 +10,17 @@ export async function GET(req: NextRequest) {
   const position = searchParams.get("position");
   const minStar = parseInt(searchParams.get("minStar") ?? "1");
   const maxStar = parseInt(searchParams.get("maxStar") ?? "5");
+  const sellerWallet = searchParams.get("sellerWallet");
+  const includeSOLD = searchParams.get("includeSOLD") === "true";
 
   const listings = await prisma.transferListing.findMany({
     where: {
-      status: "LISTED",
+      // If sellerWallet + includeSOLD: show LISTED and SOLD for seller
+      // Otherwise: only show LISTED
+      status:
+        sellerWallet && includeSOLD ? { in: ["LISTED", "SOLD"] } : "LISTED",
+      isSOLListing: true,
+      ...(sellerWallet ? { sellerWallet } : {}),
       player: {
         starRating: { gte: minStar, lte: maxStar },
         ...(position ? { position: position as any } : {}),
