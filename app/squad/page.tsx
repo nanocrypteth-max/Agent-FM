@@ -1,6 +1,7 @@
 "use client";
 
 import AuthWall from "@/components/auth/AuthWall";
+import { useAuth } from "@/lib/auth/useAuth";
 import { useEffect, useState, useMemo } from "react";
 import { formationToSlots } from "@/lib/match-engine/formations";
 
@@ -60,29 +61,33 @@ export default function SquadPage() {
 }
 
 function SquadContent() {
+  const { walletAddress } = useAuth();
   const [team, setTeam] = useState<TeamInfo | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
   const [formation, setFormation] = useState<string>("4-4-2");
-  const [slots, setSlots] = useState<Map<number, string>>(new Map()); // slotIndex -> playerId
+  const [slots, setSlots] = useState<Map<number, string>>(new Map());
   const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/squad")
+    if (!walletAddress) return;
+
+    fetch(`/api/squad?wallet=${walletAddress}`)
       .then((r) => r.json())
       .then((data) => {
+        if (!data.team || !data.players) return;
         setTeam(data.team);
-        setPlayers(data.players);
+        setPlayers(data.players ?? []);
         setFormation(data.team.formation || "4-4-2");
-        // Restore existing slot assignments
         const map = new Map<number, string>();
-        data.players.forEach((p: Player) => {
+        (data.players ?? []).forEach((p: Player) => {
           if (p.slotIndex !== null) map.set(p.slotIndex, p.id);
         });
         setSlots(map);
-      });
-  }, []);
+      })
+      .catch(() => {});
+  }, [walletAddress]);
 
   const pitchSlots = formationToSlots(formation as any, "HOME");
   const req = POSITION_REQ[formation] ?? POSITION_REQ["4-4-2"];

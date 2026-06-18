@@ -8,6 +8,7 @@ import { formationToSlots } from "@/lib/match-engine/formations";
 import type { MatchEvent, Formation } from "@/lib/match-engine/types";
 import { useMatchSounds, eventToSound } from "@/lib/sound/useMatchSounds";
 import AuthWall from "@/components/auth/AuthWall";
+import { useAuth } from "@/lib/auth/useAuth";
 
 interface TeamInfo {
   id: string;
@@ -77,6 +78,12 @@ function MatchContent() {
   const params = useParams();
   const router = useRouter();
   const fixtureId = params.id as string;
+  const { walletAddress } = useAuth();
+
+  // Expose wallet to window so the FULL_TIME handler can access it
+  useEffect(() => {
+    if (walletAddress) (window as any).__agentfm_wallet = walletAddress;
+  }, [walletAddress]);
 
   const [data, setData] = useState<FixtureData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -90,7 +97,15 @@ function MatchContent() {
   const [feed, setFeed] = useState<MatchEvent[]>([]);
   const [matchOver, setMatchOver] = useState(false);
   const [speed, setSpeed] = useState(1);
-  const [goalFlash, setGoalFlash] = useState(0); // incrementing key to retrigger CSS animation
+  const [goalFlash, setGoalFlash] = useState(0);
+  const [expPopup, setExpPopup] = useState<{
+    result: "WIN" | "DRAW" | "LOSS";
+    expGained: number;
+    newExp: number;
+    newLevel: number;
+    leveledUp: boolean;
+    mvpName: string | null;
+  } | null>(null);
   const { play, muted, toggleMute } = useMatchSounds();
 
   const load = useCallback(async () => {
@@ -206,6 +221,73 @@ function MatchContent() {
         }
         if (ev.type === "FULL_TIME") {
           setMatchOver(true);
+          // Fetch updated session to get EXP gained
+          setTimeout(async () => {
+            try {
+              const sessionRes = await fetch(`/api/fixtures/${fixtureId}`);
+              const sessionData = await sessionRes.json();
+              if (!sessionRes.ok) return;
+
+              const homeScore = sessionData.homeScore ?? 0;
+              const awayScore = sessionData.awayScore ?? 0;
+              const isHome = sessionData.homeTeam?.isUserControlled;
+              const isAway = sessionData.awayTeam?.isUserControlled;
+              if (!isHome && !isAway) return;
+
+              const userScore = isHome ? homeScore : awayScore;
+              const oppScore = isHome ? awayScore : homeScore;
+              const result: "WIN" | "DRAW" | "LOSS" =
+                userScore > oppScore
+                  ? "WIN"
+                  : userScore === oppScore
+                    ? "DRAW"
+                    : "LOSS";
+
+              // Fetch latest session for updated EXP
+              const walletRes = await fetch(
+                "/api/auth?" +
+                  new URLSearchParams({
+                    wallet: (window as any).__agentfm_wallet ?? "",
+                  }),
+              );
+              if (walletRes.ok) {
+                const walletData = await walletRes.json();
+                const s = walletData.session;
+                if (s) {
+                  const expGained =
+                    result === "WIN"
+                      ? 50 + s.managerLevel * 10
+                      : result === "DRAW"
+                        ? 20
+                        : 10;
+
+                  // Find MVP from match result
+                  const mvpEvent = sessionData.matchResult?.events
+                    ?.filter((e: any) => e.playerId)
+                    ?.reduce((best: any, e: any) => {
+                      const pts =
+                        e.type === "GOAL"
+                          ? 3
+                          : e.type === "SAVE"
+                            ? 2
+                            : e.type === "SHOT"
+                              ? 1
+                              : 0;
+                      return pts > (best?.pts ?? 0) ? { ...e, pts } : best;
+                    }, null);
+
+                  setExpPopup({
+                    result,
+                    expGained,
+                    newExp: s.managerExp,
+                    newLevel: s.managerLevel,
+                    leveledUp: false, // shown via portal message
+                    mvpName: mvpEvent?.playerName ?? null,
+                  });
+                }
+              }
+            } catch {}
+          }, 1800); // delay so PitchView finishes first
         }
 
         const soundKey = eventToSound(ev.type);
@@ -567,6 +649,11 @@ function MatchContent() {
           )}
         </div>
       </div>
+
+      {/* EXP Popup */}
+      {expPopup && (
+        <ExpResultPopup {...expPopup} onClose={() => setExpPopup(null)} />
+      )}
     </div>
   );
 }
@@ -840,5 +927,377 @@ function Centered({ children }: { children: React.ReactNode }) {
     >
       {children}
     </div>
+  );
+}
+
+// ─── EXP Result Popup ─────────────────────────────────────────────────────────
+
+const RESULT_CONFIG = {
+  WIN: {
+    emoji: "🏆",
+    label: "Victory!",
+    color: "#ffd700",
+    glow: "rgba(255,215,0,0.4)",
+  },
+  DRAW: {
+    emoji: "🤝",
+    label: "Draw",
+    color: "#4fc3f7",
+    glow: "rgba(79,195,247,0.3)",
+  },
+  LOSS: {
+    emoji: "💔",
+    label: "Defeat",
+    color: "#ff5252",
+    glow: "rgba(255,82,82,0.3)",
+  },
+};
+
+function ExpResultPopup({
+  result,
+  expGained,
+  newExp,
+  newLevel,
+  mvpName,
+  onClose,
+}: {
+  result: "WIN" | "DRAW" | "LOSS";
+  expGained: number;
+  newExp: number;
+  newLevel: number;
+  leveledUp: boolean;
+  mvpName: string | null;
+  onClose: () => void;
+}) {
+  const cfg = RESULT_CONFIG[result];
+  const [visible, setVisible] = useState(false);
+  const [showEXP, setShowEXP] = useState(false);
+  const [showMVP, setShowMVP] = useState(false);
+
+  useEffect(() => {
+    const t1 = setTimeout(() => setVisible(true), 50);
+    const t2 = setTimeout(() => setShowEXP(true), 600);
+    const t3 = setTimeout(() => setShowMVP(true), 1000);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
+    };
+  }, []);
+
+  function handleClose() {
+    setVisible(false);
+    setTimeout(onClose, 300);
+  }
+
+  return (
+    <>
+      <div
+        onClick={handleClose}
+        style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 300,
+          background: "rgba(0,0,0,0.75)",
+          backdropFilter: "blur(6px)",
+          opacity: visible ? 1 : 0,
+          transition: "opacity 0.3s ease",
+        }}
+      />
+
+      <div
+        style={{
+          position: "fixed",
+          top: "50%",
+          left: "50%",
+          transform: visible
+            ? "translate(-50%, -50%) scale(1)"
+            : "translate(-50%, -50%) scale(0.85)",
+          zIndex: 301,
+          width: "min(440px, 92vw)",
+          background: "linear-gradient(160deg, #0d1117 0%, #0a0d12 100%)",
+          border: `1px solid ${cfg.color}44`,
+          borderRadius: 16,
+          overflow: "hidden",
+          boxShadow: `0 0 60px ${cfg.glow}, 0 24px 64px rgba(0,0,0,0.7)`,
+          opacity: visible ? 1 : 0,
+          transition: "all 0.35s cubic-bezier(0.34,1.56,0.64,1)",
+        }}
+      >
+        {/* Top glow strip */}
+        <div
+          style={{
+            height: 3,
+            background: `linear-gradient(90deg, transparent, ${cfg.color}, transparent)`,
+            boxShadow: `0 0 20px ${cfg.glow}`,
+          }}
+        />
+
+        {/* Floating particles for WIN */}
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            overflow: "hidden",
+            pointerEvents: "none",
+          }}
+        >
+          {result === "WIN" &&
+            Array.from({ length: 12 }).map((_, i) => (
+              <div
+                key={i}
+                style={{
+                  position: "absolute",
+                  left: `${8 + ((i * 8) % 84)}%`,
+                  top: `${10 + ((i * 13) % 70)}%`,
+                  width: 4,
+                  height: 4,
+                  borderRadius: "50%",
+                  background:
+                    i % 3 === 0 ? "#ffd700" : i % 3 === 1 ? "#fff" : "#4fc3f7",
+                  opacity: 0.6,
+                  animation: `exp-float ${1.5 + (i % 4) * 0.4}s ease-in-out ${i * 0.15}s infinite alternate`,
+                }}
+              />
+            ))}
+        </div>
+
+        <div
+          style={{
+            padding: "32px 28px 28px",
+            textAlign: "center",
+            position: "relative",
+          }}
+        >
+          {/* Result emoji */}
+          <div
+            style={{
+              fontSize: 72,
+              filter: `drop-shadow(0 0 24px ${cfg.glow})`,
+              animation:
+                "exp-bounce 0.6s cubic-bezier(0.34,1.56,0.64,1) 0.1s both",
+            }}
+          >
+            {cfg.emoji}
+          </div>
+
+          <div style={{ marginTop: 8, marginBottom: 4 }}>
+            <span
+              style={{
+                display: "inline-block",
+                padding: "4px 16px",
+                borderRadius: 20,
+                background: `${cfg.color}18`,
+                border: `1px solid ${cfg.color}55`,
+                color: cfg.color,
+                fontSize: 11,
+                fontFamily: "var(--display)",
+                textTransform: "uppercase",
+                letterSpacing: 3,
+              }}
+            >
+              World Stage 2026
+            </span>
+          </div>
+
+          <h2
+            style={{
+              fontFamily: "var(--display)",
+              fontSize: "2.2rem",
+              textTransform: "uppercase",
+              letterSpacing: 2,
+              color: cfg.color,
+              margin: "10px 0 24px",
+              textShadow: `0 0 30px ${cfg.glow}`,
+            }}
+          >
+            {cfg.label}
+          </h2>
+
+          {/* EXP gained */}
+          <div
+            style={{
+              opacity: showEXP ? 1 : 0,
+              transform: showEXP ? "translateY(0)" : "translateY(16px)",
+              transition: "all 0.5s cubic-bezier(0.34,1.56,0.64,1)",
+            }}
+          >
+            <div
+              style={{
+                background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.08)",
+                borderRadius: 12,
+                padding: "16px 20px",
+                marginBottom: 12,
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 11,
+                  color: "var(--ink-dim)",
+                  textTransform: "uppercase",
+                  letterSpacing: 2,
+                  marginBottom: 10,
+                }}
+              >
+                Manager EXP Gained
+              </div>
+              <div
+                style={{
+                  fontFamily: "var(--mono)",
+                  fontSize: "2.6rem",
+                  fontWeight: 700,
+                  color: cfg.color,
+                  textShadow: `0 0 20px ${cfg.glow}`,
+                  letterSpacing: 1,
+                }}
+              >
+                +{expGained}{" "}
+                <span
+                  style={{
+                    fontSize: "1rem",
+                    color: "var(--ink-dim)",
+                    fontFamily: "var(--display)",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  EXP
+                </span>
+              </div>
+
+              {/* Progress bar */}
+              <div style={{ marginTop: 12 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    fontSize: 10,
+                    color: "var(--ink-dim)",
+                    marginBottom: 4,
+                  }}
+                >
+                  <span>Level {newLevel}</span>
+                  <span>{newExp} EXP total</span>
+                </div>
+                <div
+                  style={{
+                    height: 6,
+                    borderRadius: 3,
+                    background: "rgba(255,255,255,0.06)",
+                    overflow: "hidden",
+                  }}
+                >
+                  <div
+                    style={{
+                      height: "100%",
+                      width: `${Math.min(100, (newExp % 500) / 5)}%`,
+                      background: `linear-gradient(90deg, ${cfg.color}88, ${cfg.color})`,
+                      borderRadius: 3,
+                      transition: "width 1s ease 0.8s",
+                      boxShadow: `0 0 8px ${cfg.glow}`,
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* MVP */}
+          {mvpName && (
+            <div
+              style={{
+                opacity: showMVP ? 1 : 0,
+                transform: showMVP ? "translateY(0)" : "translateY(12px)",
+                transition: "all 0.4s ease",
+                background: "rgba(255,215,0,0.06)",
+                border: "1px solid rgba(255,215,0,0.2)",
+                borderRadius: 10,
+                padding: "12px 16px",
+                marginBottom: 12,
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+              }}
+            >
+              <span style={{ fontSize: 22 }}>⭐</span>
+              <div style={{ textAlign: "left" }}>
+                <div
+                  style={{
+                    fontSize: 10,
+                    color: "var(--ink-dim)",
+                    textTransform: "uppercase",
+                    letterSpacing: 1,
+                  }}
+                >
+                  Man of the Match
+                </div>
+                <div
+                  style={{
+                    fontSize: 14,
+                    fontFamily: "var(--display)",
+                    color: "var(--ws-gold)",
+                    textTransform: "uppercase",
+                    letterSpacing: 1,
+                  }}
+                >
+                  {mvpName}
+                </div>
+              </div>
+              <div
+                style={{
+                  marginLeft: "auto",
+                  fontSize: 11,
+                  color: "var(--ws-gold)",
+                  fontFamily: "var(--mono)",
+                }}
+              >
+                +50 Player EXP
+              </div>
+            </div>
+          )}
+
+          {/* Close */}
+          <button
+            onClick={handleClose}
+            style={{
+              width: "100%",
+              padding: "13px",
+              borderRadius: 10,
+              border: "none",
+              background: `linear-gradient(135deg, ${cfg.color}cc, ${cfg.color})`,
+              color: "#0a0d12",
+              fontFamily: "var(--display)",
+              fontWeight: 700,
+              fontSize: 14,
+              textTransform: "uppercase",
+              letterSpacing: 2,
+              cursor: "pointer",
+              boxShadow: `0 4px 20px ${cfg.glow}`,
+              marginTop: 4,
+            }}
+          >
+            Continue →
+          </button>
+        </div>
+
+        <div
+          style={{
+            height: 2,
+            background: `linear-gradient(90deg, transparent, ${cfg.color}66, transparent)`,
+          }}
+        />
+      </div>
+
+      <style>{`
+        @keyframes exp-bounce {
+          from { transform: scale(0.3); opacity: 0; }
+          to   { transform: scale(1);   opacity: 1; }
+        }
+        @keyframes exp-float {
+          from { transform: translateY(0) rotate(0deg);   opacity: 0.3; }
+          to   { transform: translateY(-12px) rotate(180deg); opacity: 0.8; }
+        }
+      `}</style>
+    </>
   );
 }
