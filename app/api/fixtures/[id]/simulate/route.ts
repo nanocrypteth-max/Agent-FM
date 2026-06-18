@@ -7,6 +7,13 @@ import {
   TacticsResult,
 } from "@/lib/ai-agent/generate-tactics";
 import type { MatchSimInput, TeamMatchData } from "@/lib/match-engine/types";
+import { matchExpGain, levelFromExp } from "@/lib/exp/manager";
+import {
+  computeMVP,
+  MVP_EXP_GAIN,
+  STARTER_EXP_GAIN,
+  playerLevelFromExp,
+} from "@/lib/exp/player";
 
 // Force dynamic rendering — this route queries the DB
 export const dynamic = "force-dynamic";
@@ -130,6 +137,16 @@ export async function POST(
       }),
     ]);
 
+    // ─── Award EXP (non-blocking, fire-and-forget) ───────────────────────────
+    awardMatchExp({
+      matchResultId: matchResult.id,
+      homeTeamId: fixture.homeTeam.id,
+      awayTeamId: fixture.awayTeam.id,
+      homeScore: result.homeScore,
+      awayScore: result.awayScore,
+      events: result.events,
+    }).catch((err) => console.error("[exp] award failed:", err));
+
     return NextResponse.json({
       fixtureId,
       homeScore: result.homeScore,
@@ -138,8 +155,6 @@ export async function POST(
       eventCount: result.events.length,
     });
   } catch (err: any) {
-    // P2002 = unique constraint violation on MatchResult.fixtureId (race condition:
-    // another request simulated this fixture between our check and this write)
     if (err.code === "P2002") {
       const existing = await prisma.matchResult.findUnique({
         where: { fixtureId },
@@ -154,6 +169,110 @@ export async function POST(
     }
     throw err;
   }
+}
+
+/**
+ * Award EXP to managers and MVP player after a match.
+ * Called fire-and-forget so it never delays the match response.
+ */
+async function awardMatchExp({
+  matchResultId,
+  homeTeamId,
+  awayTeamId,
+  homeScore,
+  awayScore,
+  events,
+}: {
+  matchResultId: string;
+  homeTeamId: string;
+  awayTeamId: string;
+  homeScore: number;
+  awayScore: number;
+  events: any[];
+}) {
+  const [homeSession, awaySession] = await Promise.all([
+    prisma.userSession.findUnique({ where: { teamId: homeTeamId } }),
+    prisma.userSession.findUnique({ where: { teamId: awayTeamId } }),
+  ]);
+
+  const updates: Promise<unknown>[] = [];
+
+  // Award manager EXP
+  const awardManager = (
+    session: {
+      id: string;
+      managerExp: number;
+      managerLevel: number;
+      solanaWallet: string;
+      totalMatches: number;
+      totalWins: number;
+    } | null,
+    result: "WIN" | "DRAW" | "LOSS",
+  ) => {
+    if (!session) return;
+    const gained = matchExpGain(result, session.managerLevel);
+    const newExp = session.managerExp + gained;
+    const newLevel = levelFromExp(newExp);
+    const leveledUp = newLevel > session.managerLevel;
+
+    updates.push(
+      prisma.userSession.update({
+        where: { id: session.id },
+        data: {
+          managerExp: newExp,
+          managerLevel: newLevel,
+          totalMatches: { increment: 1 },
+          ...(result === "WIN" ? { totalWins: { increment: 1 } } : {}),
+        },
+      }),
+    );
+
+    // Portal message with EXP summary
+    updates.push(
+      prisma.portalMessage.create({
+        data: {
+          type: "EXP",
+          title: `Match Result: ${result} · +${gained} EXP`,
+          content: `${result === "WIN" ? "🏆 Victory!" : result === "DRAW" ? "🤝 Draw." : "❌ Defeat."} You earned ${gained} EXP. Manager Level ${newLevel}${leveledUp ? " 🎉 LEVEL UP!" : ""} · Total: ${newExp} EXP.`,
+          walletAddress: session.solanaWallet,
+          metadata: { gained, newExp, newLevel, leveledUp },
+        },
+      }),
+    );
+  };
+
+  if (homeScore > awayScore) {
+    awardManager(homeSession, "WIN");
+    awardManager(awaySession, "LOSS");
+  } else if (homeScore < awayScore) {
+    awardManager(homeSession, "LOSS");
+    awardManager(awaySession, "WIN");
+  } else {
+    awardManager(homeSession, "DRAW");
+    awardManager(awaySession, "DRAW");
+  }
+
+  // Award MVP player EXP
+  const mvpPlayerId = computeMVP(events);
+  if (mvpPlayerId) {
+    const mvp = await prisma.player.findUnique({ where: { id: mvpPlayerId } });
+    if (mvp) {
+      const newExp = mvp.playerExp + MVP_EXP_GAIN;
+      const newLevel = playerLevelFromExp(newExp);
+      updates.push(
+        prisma.player.update({
+          where: { id: mvpPlayerId },
+          data: { playerExp: newExp, playerLevel: newLevel },
+        }),
+        prisma.matchResult.update({
+          where: { id: matchResultId },
+          data: { mvpPlayerId },
+        }),
+      );
+    }
+  }
+
+  await Promise.all(updates);
 }
 
 /**

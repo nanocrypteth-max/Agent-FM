@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useAuth } from "@/lib/auth/useAuth";
 import AuthWall from "@/components/auth/AuthWall";
 import { levelProgress, trainingGainRange } from "@/lib/exp/manager";
@@ -18,25 +18,77 @@ interface TrainingPlayer {
   playerExp: number;
   playerLevel: number;
   avatarSvg: string | null;
-  canTrainToday: boolean;
+}
+
+/** Returns HH:MM:SS countdown string until a target ISO datetime */
+function useCountdown(targetIso: string): string {
+  const [display, setDisplay] = useState("");
+
+  useEffect(() => {
+    if (!targetIso) return;
+
+    function update() {
+      const diff = new Date(targetIso).getTime() - Date.now();
+      if (diff <= 0) {
+        setDisplay("00:00:00");
+        return;
+      }
+      const h = Math.floor(diff / 3_600_000);
+      const m = Math.floor((diff % 3_600_000) / 60_000);
+      const s = Math.floor((diff % 60_000) / 1_000);
+      setDisplay(
+        `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`,
+      );
+    }
+
+    update();
+    const id = setInterval(update, 1_000);
+    return () => clearInterval(id);
+  }, [targetIso]);
+
+  return display;
 }
 
 export default function TrainPage() {
-  return <AuthWall><TrainContent /></AuthWall>;
+  return (
+    <AuthWall>
+      <TrainContent />
+    </AuthWall>
+  );
 }
 
 function TrainContent() {
   const { session, walletAddress } = useAuth();
   const [players, setPlayers] = useState<TrainingPlayer[]>([]);
   const [managerLevel, setManagerLevel] = useState(1);
+  const [managerExp, setManagerExp] = useState(0);
+  const [clubCanTrain, setClubCanTrain] = useState(true);
   const [loading, setLoading] = useState(true);
   const [training, setTraining] = useState<string | null>(null);
-  const [result, setResult] = useState<{ playerId: string; stat: string; gain: number; newValue: number } | null>(null);
+  const [result, setResult] = useState<{
+    playerId: string;
+    stat: string;
+    gain: number;
+    newValue: number;
+  } | null>(null);
   const [nextReset, setNextReset] = useState<string>("");
+
+  const countdown = useCountdown(nextReset);
 
   useEffect(() => {
     if (walletAddress) loadTraining();
   }, [walletAddress]);
+
+  // Auto-refresh when cooldown expires so UI unlocks without manual refresh
+  useEffect(() => {
+    if (!nextReset || clubCanTrain) return;
+    const diff = new Date(nextReset).getTime() - Date.now();
+    if (diff <= 0) return;
+    const id = setTimeout(() => {
+      loadTraining();
+    }, diff + 1000); // +1s buffer
+    return () => clearTimeout(id);
+  }, [nextReset, clubCanTrain]);
 
   async function loadTraining() {
     setLoading(true);
@@ -45,6 +97,8 @@ function TrainContent() {
       const data = await res.json();
       setPlayers(data.players);
       setManagerLevel(data.managerLevel);
+      setManagerExp(data.managerExp ?? 0);
+      setClubCanTrain(data.clubCanTrainToday);
       setNextReset(data.nextResetAt);
     }
     setLoading(false);
@@ -61,13 +115,18 @@ function TrainContent() {
     const data = await res.json();
     if (res.ok) {
       setResult({ playerId, ...data });
-      // Update player in list
+      setClubCanTrain(false); // club used daily training slot
       setPlayers((prev) =>
         prev.map((p) =>
           p.id === playerId
-            ? { ...p, [data.stat]: data.newValue, canTrainToday: false, playerExp: data.playerExp, playerLevel: data.playerLevel }
-            : p
-        )
+            ? {
+                ...p,
+                [data.stat]: data.newValue,
+                playerExp: data.playerExp,
+                playerLevel: data.playerLevel,
+              }
+            : p,
+        ),
       );
     }
     setTraining(null);
@@ -81,64 +140,219 @@ function TrainContent() {
   return (
     <div className="page">
       <div className="ws-hero" style={{ marginBottom: 20 }}>
-        <div className="ws-badge"><span className="pulse-ball" />Training Ground</div>
+        <div className="ws-badge">
+          <span className="pulse-ball" />
+          Training Ground
+        </div>
         <h1 className="ws-title">Player Training</h1>
         <p className="ws-subtitle">
-          Train each player once per day. Stat gains depend on your manager level.
-          Resets at midnight UTC ({resetTime} your time).
+          Train each player once per day. Stat gains depend on your manager
+          level. Resets at midnight UTC each day.
         </p>
       </div>
 
       {/* Manager level info */}
       {session && (
-        <div className="panel" style={{ padding: "12px 16px", marginBottom: 16, display: "flex", gap: 24, alignItems: "center" }}>
+        <div
+          className="panel"
+          style={{
+            padding: "12px 16px",
+            marginBottom: 16,
+            display: "flex",
+            gap: 24,
+            alignItems: "center",
+          }}
+        >
           <div>
-            <div style={{ fontSize: 11, color: "var(--ink-dim)", textTransform: "uppercase", letterSpacing: 1 }}>Manager Level</div>
-            <div style={{ fontFamily: "var(--mono)", fontSize: "1.4rem", fontWeight: 700, color: "var(--ws-gold)" }}>
+            <div
+              style={{
+                fontSize: 11,
+                color: "var(--ink-dim)",
+                textTransform: "uppercase",
+                letterSpacing: 1,
+              }}
+            >
+              Manager Level
+            </div>
+            <div
+              style={{
+                fontFamily: "var(--mono)",
+                fontSize: "1.4rem",
+                fontWeight: 700,
+                color: "var(--ws-gold)",
+              }}
+            >
               LV {session.managerLevel}
             </div>
           </div>
           <div style={{ flex: 1 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4, fontSize: 11, color: "var(--ink-dim)" }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                marginBottom: 4,
+                fontSize: 11,
+                color: "var(--ink-dim)",
+              }}
+            >
               <span>{session.managerExp} EXP</span>
-              <span>{levelProgress(session.managerExp, session.managerLevel).expToNext} to next level</span>
+              <span>
+                {
+                  levelProgress(session.managerExp, session.managerLevel)
+                    .expToNext
+                }{" "}
+                to next level
+              </span>
             </div>
-            <div style={{ height: 6, borderRadius: 3, background: "var(--border)", overflow: "hidden" }}>
-              <div style={{
-                height: "100%",
-                width: `${levelProgress(session.managerExp, session.managerLevel).progressPercent}%`,
-                background: "linear-gradient(90deg, var(--ws-gold-dim), var(--ws-gold))",
+            <div
+              style={{
+                height: 6,
                 borderRadius: 3,
-                transition: "width 0.5s ease",
-              }} />
+                background: "var(--border)",
+                overflow: "hidden",
+              }}
+            >
+              <div
+                style={{
+                  height: "100%",
+                  width: `${levelProgress(session.managerExp, session.managerLevel).progressPercent}%`,
+                  background:
+                    "linear-gradient(90deg, var(--ws-gold-dim), var(--ws-gold))",
+                  borderRadius: 3,
+                  transition: "width 0.5s ease",
+                }}
+              />
             </div>
           </div>
-          <div style={{ textAlign: "right", fontSize: 12, color: "var(--ink-dim)" }}>
-            Training gain: <span style={{ color: "var(--ws-green-bright)" }}>+{min} to +{max}</span>
+          <div
+            style={{
+              textAlign: "right",
+              fontSize: 12,
+              color: "var(--ink-dim)",
+            }}
+          >
+            Training gain:{" "}
+            <span style={{ color: "var(--ws-green-bright)" }}>
+              +{min} to +{max}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Club training status banner */}
+      {!clubCanTrain ? (
+        <div
+          style={{
+            padding: "16px 20px",
+            marginBottom: 16,
+            borderRadius: 8,
+            background: "rgba(255,152,0,0.08)",
+            border: "1px solid rgba(255,152,0,0.4)",
+            display: "flex",
+            alignItems: "center",
+            gap: 16,
+          }}
+        >
+          <span style={{ fontSize: 28 }}>🏋️</span>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "#ff9800" }}>
+              Club has trained today
+            </div>
+            <div
+              style={{ fontSize: 11, color: "var(--ink-dim)", marginTop: 2 }}
+            >
+              Daily training slot used. Next session available in:
+            </div>
+          </div>
+          {/* Countdown timer */}
+          <div
+            style={{
+              fontFamily: "var(--mono)",
+              fontSize: "1.6rem",
+              fontWeight: 700,
+              color: "#ff9800",
+              letterSpacing: 2,
+              background: "rgba(255,152,0,0.12)",
+              padding: "8px 16px",
+              borderRadius: 8,
+              border: "1px solid rgba(255,152,0,0.3)",
+              minWidth: 120,
+              textAlign: "center",
+            }}
+          >
+            {countdown || "00:00:00"}
+          </div>
+        </div>
+      ) : (
+        <div
+          style={{
+            padding: "14px 18px",
+            marginBottom: 16,
+            borderRadius: 8,
+            background: "rgba(46,204,113,0.08)",
+            border: "1px solid rgba(46,204,113,0.3)",
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+          }}
+        >
+          <span style={{ fontSize: 24 }}>⚡</span>
+          <div>
+            <div
+              style={{
+                fontSize: 13,
+                fontWeight: 600,
+                color: "var(--ws-green-bright)",
+              }}
+            >
+              Training available
+            </div>
+            <div
+              style={{ fontSize: 11, color: "var(--ink-dim)", marginTop: 2 }}
+            >
+              Choose 1 player to train today. Only 1 session per day — choose
+              wisely.
+            </div>
           </div>
         </div>
       )}
 
       {/* Result flash */}
       {result && (
-        <div style={{
-          padding: "12px 16px", marginBottom: 16, borderRadius: 8,
-          background: "rgba(46,204,113,0.1)", border: "1px solid var(--ws-green-bright)",
-          fontSize: 14, color: "var(--ws-green-bright)",
-        }}>
-          🎯 {players.find((p) => p.id === result.playerId)?.name} — {result.stat.toUpperCase()}{" "}
-          {result.gain > 0 ? `+${result.gain} (now ${result.newValue})` : "already maxed at 99!"}
+        <div
+          style={{
+            padding: "12px 16px",
+            marginBottom: 16,
+            borderRadius: 8,
+            background: "rgba(46,204,113,0.1)",
+            border: "1px solid var(--ws-green-bright)",
+            fontSize: 14,
+            color: "var(--ws-green-bright)",
+          }}
+        >
+          🎯 {players.find((p) => p.id === result.playerId)?.name} —{" "}
+          {result.stat.toUpperCase()}{" "}
+          {result.gain > 0
+            ? `+${result.gain} (now ${result.newValue})`
+            : "already maxed at 99!"}
         </div>
       )}
 
       {/* Player grid */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 14 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))",
+          gap: 14,
+        }}
+      >
         {players.map((p) => (
           <TrainingCard
             key={p.id}
             player={p}
             onTrain={() => handleTrain(p.id)}
             training={training === p.id}
+            clubCanTrain={clubCanTrain}
           />
         ))}
       </div>
@@ -146,10 +360,16 @@ function TrainContent() {
   );
 }
 
-function TrainingCard({ player: p, onTrain, training }: {
+function TrainingCard({
+  player: p,
+  onTrain,
+  training,
+  clubCanTrain,
+}: {
   player: TrainingPlayer;
   onTrain: () => void;
   training: boolean;
+  clubCanTrain: boolean;
 }) {
   const stats = [
     { label: "PAC", val: p.pace },
@@ -160,17 +380,48 @@ function TrainingCard({ player: p, onTrain, training }: {
   ];
 
   return (
-    <div className="panel" style={{ overflow: "hidden", display: "flex", flexDirection: "column" }}>
-      <div style={{ padding: "14px 14px 8px", display: "flex", gap: 12, alignItems: "flex-start" }}>
+    <div
+      className="panel"
+      style={{ overflow: "hidden", display: "flex", flexDirection: "column" }}
+    >
+      <div
+        style={{
+          padding: "14px 14px 8px",
+          display: "flex",
+          gap: 12,
+          alignItems: "flex-start",
+        }}
+      >
         {p.avatarSvg && (
-          <div style={{ width: 56, flexShrink: 0 }} dangerouslySetInnerHTML={{ __html: p.avatarSvg }} />
+          <div
+            style={{ width: 56, flexShrink: 0 }}
+            dangerouslySetInnerHTML={{ __html: p.avatarSvg }}
+          />
         )}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontFamily: "var(--display)", fontSize: "0.95rem", textTransform: "uppercase", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <div
+            style={{
+              fontFamily: "var(--display)",
+              fontSize: "0.95rem",
+              textTransform: "uppercase",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
             {p.name}
           </div>
           <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
-            <span style={{ fontSize: 10, padding: "2px 6px", borderRadius: 3, background: posBg(p.position), color: "#0a0d12", fontWeight: 700 }}>
+            <span
+              style={{
+                fontSize: 10,
+                padding: "2px 6px",
+                borderRadius: 3,
+                background: posBg(p.position),
+                color: "#0a0d12",
+                fontWeight: 700,
+              }}
+            >
               {p.position}
             </span>
             <span style={{ fontSize: 11, color: "var(--ws-gold)" }}>
@@ -183,38 +434,74 @@ function TrainingCard({ player: p, onTrain, training }: {
         </div>
       </div>
 
-      <div style={{ display: "flex", padding: "8px 14px", borderTop: "1px solid var(--border)", borderBottom: "1px solid var(--border)" }}>
+      <div
+        style={{
+          display: "flex",
+          padding: "8px 14px",
+          borderTop: "1px solid var(--border)",
+          borderBottom: "1px solid var(--border)",
+        }}
+      >
         {stats.map((s) => (
           <div key={s.label} style={{ flex: 1, textAlign: "center" }}>
-            <div style={{ fontFamily: "var(--mono)", fontSize: 14, fontWeight: 700, color: statColor(s.val) }}>{s.val}</div>
-            <div style={{ fontSize: 8, color: "var(--ink-dim)", textTransform: "uppercase" }}>{s.label}</div>
+            <div
+              style={{
+                fontFamily: "var(--mono)",
+                fontSize: 14,
+                fontWeight: 700,
+                color: statColor(s.val),
+              }}
+            >
+              {s.val}
+            </div>
+            <div
+              style={{
+                fontSize: 8,
+                color: "var(--ink-dim)",
+                textTransform: "uppercase",
+              }}
+            >
+              {s.label}
+            </div>
           </div>
         ))}
       </div>
 
       <div style={{ padding: "10px 14px" }}>
-        {p.canTrainToday ? (
+        {clubCanTrain ? (
           <button
             onClick={onTrain}
             disabled={training}
             style={{
-              width: "100%", padding: "9px", borderRadius: 6, border: "none",
+              width: "100%",
+              padding: "9px",
+              borderRadius: 6,
+              border: "none",
               background: training ? "var(--border)" : "var(--ws-gold)",
               color: training ? "var(--ink-dim)" : "#0a0d12",
-              fontFamily: "var(--display)", fontWeight: 700,
-              fontSize: 12, textTransform: "uppercase", letterSpacing: 1,
+              fontFamily: "var(--display)",
+              fontWeight: 700,
+              fontSize: 12,
+              textTransform: "uppercase",
+              letterSpacing: 1,
               cursor: training ? "not-allowed" : "pointer",
             }}
           >
-            {training ? "Training..." : "⚡ Train Now"}
+            {training ? "Training..." : "⚡ Train This Player"}
           </button>
         ) : (
-          <div style={{
-            textAlign: "center", padding: "8px", fontSize: 11,
-            color: "var(--ink-dim)", background: "var(--panel-bg)",
-            borderRadius: 6, border: "1px solid var(--border)",
-          }}>
-            ✓ Trained today · Resets midnight UTC
+          <div
+            style={{
+              textAlign: "center",
+              padding: "8px",
+              fontSize: 11,
+              color: "var(--ink-dim)",
+              background: "var(--panel-bg)",
+              borderRadius: 6,
+              border: "1px solid var(--border)",
+            }}
+          >
+            Club trained today
           </div>
         )}
       </div>
@@ -223,13 +510,34 @@ function TrainingCard({ player: p, onTrain, training }: {
 }
 
 function posBg(pos: string): string {
-  return { GK: "#ffd700", DF: "#4fc3f7", MF: "#ce93d8", FW: "#ff5252" }[pos] ?? "#888";
+  return (
+    { GK: "#ffd700", DF: "#4fc3f7", MF: "#ce93d8", FW: "#ff5252" }[pos] ??
+    "#888"
+  );
 }
 
 function statColor(v: number): string {
-  return v >= 80 ? "#4caf50" : v >= 65 ? "#ffd700" : v >= 50 ? "#ff9800" : "#ff5252";
+  return v >= 80
+    ? "#4caf50"
+    : v >= 65
+      ? "#ffd700"
+      : v >= 50
+        ? "#ff9800"
+        : "#ff5252";
 }
 
 function Centered({ children }: { children: React.ReactNode }) {
-  return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "60vh", color: "var(--ink)" }}>{children}</div>;
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        height: "60vh",
+        color: "var(--ink)",
+      }}
+    >
+      {children}
+    </div>
+  );
 }
