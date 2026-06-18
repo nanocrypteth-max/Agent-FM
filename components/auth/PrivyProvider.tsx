@@ -3,10 +3,14 @@
 import { PrivyProvider as BasePrivyProvider } from "@privy-io/react-auth";
 import { toSolanaWalletConnectors } from "@privy-io/react-auth/solana";
 
-const solanaConnectors = toSolanaWalletConnectors({ shouldAutoConnect: true });
+// Configure Solana wallet connectors (Phantom, Solflare, Backpack, etc.)
+const solanaConnectors = toSolanaWalletConnectors({
+  shouldAutoConnect: true,
+});
 
 export default function PrivyProvider({ children }: { children: React.ReactNode }) {
   const appId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
+  console.log("Privy App ID:", process.env.NEXT_PUBLIC_PRIVY_APP_ID);
 
   if (!appId) {
     return (
@@ -16,7 +20,7 @@ export default function PrivyProvider({ children }: { children: React.ReactNode 
           background: "rgba(255,82,82,0.15)", borderBottom: "1px solid #ff5252",
           padding: "8px 16px", fontSize: 12, color: "#ff5252", textAlign: "center",
         }}>
-          ⚠️ NEXT_PUBLIC_PRIVY_APP_ID not set — see privy_step.txt
+          ⚠️ NEXT_PUBLIC_PRIVY_APP_ID not set
         </div>
         {children}
       </>
@@ -30,21 +34,21 @@ export default function PrivyProvider({ children }: { children: React.ReactNode 
         appearance: {
           theme: "dark",
           accentColor: "#ffd700",
+          // Required: tell Privy this is a Solana-only app
+          walletChainType: "solana-only",
         },
-        loginMethods: ["wallet", "email"],
+        loginMethods: ["email", "wallet"],
         externalWallets: {
-          solana: { connectors: solanaConnectors },
+          solana: {
+            // Required: pass the Solana connectors
+            connectors: solanaConnectors,
+          },
         },
         embeddedWallets: {
-          createOnLogin: "users-without-wallets", // auto-create for email users
+          createOnLogin: "users-without-wallets",
           requireUserPasswordOnCreate: false,
+          noPromptOnSignature: true,
         },
-        solanaClusters: [
-          {
-            name: "devnet",
-            rpcUrl: process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? "https://api.devnet.solana.com",
-          },
-        ],
       }}
     >
       {children}
