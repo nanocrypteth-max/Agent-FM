@@ -458,16 +458,18 @@ function ProfileEditModal({ onClose }: { onClose: () => void }) {
         }}
       />
 
-      {/* Full-screen overlay container */}
+      {/* Full-screen overlay container — align to flex-start with padding so a
+          tall modal can scroll within the viewport instead of being centered
+          and clipped when its content exceeds the screen height */}
       <div
         style={{
           position: "fixed",
           inset: 0,
           zIndex: 201,
           display: "flex",
-          alignItems: "center",
+          alignItems: "flex-start",
           justifyContent: "center",
-          padding: 20,
+          padding: "5vh 20px",
           overflowY: "auto",
         }}
       >
@@ -475,14 +477,18 @@ function ProfileEditModal({ onClose }: { onClose: () => void }) {
           ref={modalRef}
           style={{
             width: "min(720px, 100%)",
-            maxHeight: "92vh",
+            maxHeight: "90vh",
             overflowY: "auto",
+            borderRadius: 18,
             background: "linear-gradient(160deg, #0d1117 0%, #0a0d12 100%)",
             border: "1px solid rgba(255,215,0,0.2)",
-            borderRadius: 18,
             boxShadow:
               "0 0 80px rgba(255,215,0,0.08), 0 30px 80px rgba(0,0,0,0.7)",
-            overflow: "hidden",
+            // Note: no overflow:hidden here — it would cancel overflowY:auto
+            // above and clip content taller than maxHeight instead of scrolling.
+            // Rounded corners still render correctly because every child element
+            // (header, body) sits flush against the edges with no background
+            // bleed of its own.
           }}
           className="scroll-thin"
         >
@@ -493,6 +499,7 @@ function ProfileEditModal({ onClose }: { onClose: () => void }) {
               background:
                 "linear-gradient(135deg, rgba(255,215,0,0.06), transparent)",
               borderBottom: "1px solid var(--border)",
+              borderRadius: "18px 18px 0 0",
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
@@ -542,6 +549,7 @@ function ProfileEditModal({ onClose }: { onClose: () => void }) {
               display: "grid",
               gridTemplateColumns: "220px 1fr",
               gap: 28,
+              borderRadius: "0 0 18px 18px",
             }}
           >
             {/* Left: Avatar card */}
