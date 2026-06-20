@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useAuth } from "@/lib/auth/useAuth";
 import { useHoverSound } from "@/lib/sound/useHoverSound";
 
@@ -9,12 +9,56 @@ export default function WalletButton() {
     useAuth();
   const [open, setOpen] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  const [copied, setCopied] = useState(false);
   const ctaHover = useHoverSound("cta");
   const subtleHover = useHoverSound("subtle");
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const short = walletAddress
     ? `${walletAddress.slice(0, 4)}...${walletAddress.slice(-4)}`
     : null;
+
+  // Click-outside to close dropdown — listens globally, more robust than a
+  // single full-screen backdrop div (works even with nested portals/z-index issues)
+  useEffect(() => {
+    if (!open) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(e.target as Node)
+      ) {
+        setOpen(false);
+      }
+    }
+    function handleEscape(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [open]);
+
+  async function copyAddress() {
+    if (!walletAddress) return;
+    try {
+      await navigator.clipboard.writeText(walletAddress);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      // Fallback for browsers without clipboard API permission
+      const textarea = document.createElement("textarea");
+      textarea.value = walletAddress;
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    }
+  }
 
   if (!connected) {
     return (
@@ -41,7 +85,7 @@ export default function WalletButton() {
           flexShrink: 0,
         }}
       >
-        <span>👻</span>
+        <span>🏆</span>
         {loading ? "..." : "Connect"}
       </button>
     );
@@ -49,8 +93,7 @@ export default function WalletButton() {
 
   return (
     <>
-      {/* Wallet pill button */}
-      <div style={{ position: "relative", flexShrink: 0 }}>
+      <div ref={containerRef} style={{ position: "relative", flexShrink: 0 }}>
         <button
           onClick={() => setOpen((o) => !o)}
           {...subtleHover}
@@ -67,7 +110,6 @@ export default function WalletButton() {
             transition: "all 0.15s",
           }}
         >
-          {/* Avatar or default icon */}
           <div
             style={{
               width: 28,
@@ -115,158 +157,172 @@ export default function WalletButton() {
           </span>
         </button>
 
-        {/* Dropdown */}
         {open && (
-          <>
-            <div
-              onClick={() => setOpen(false)}
-              style={{ position: "fixed", inset: 0, zIndex: 90 }}
-            />
+          <div
+            style={{
+              position: "absolute",
+              top: "calc(100% + 8px)",
+              right: 0,
+              width: 250,
+              zIndex: 100,
+              background: "var(--panel-bg-2)",
+              border: "1px solid var(--border)",
+              borderRadius: 10,
+              overflow: "hidden",
+              boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+            }}
+          >
             <div
               style={{
-                position: "absolute",
-                top: "calc(100% + 8px)",
-                right: 0,
-                width: 240,
-                zIndex: 100,
-                background: "var(--panel-bg-2)",
-                border: "1px solid var(--border)",
-                borderRadius: 10,
-                overflow: "hidden",
-                boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+                padding: "14px 16px",
+                borderBottom: "1px solid var(--border)",
+                background: "var(--panel-bg)",
               }}
             >
-              {/* Club info header */}
-              <div
-                style={{
-                  padding: "14px 16px",
-                  borderBottom: "1px solid var(--border)",
-                  background: "var(--panel-bg)",
-                }}
-              >
-                <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                  <div
-                    style={{
-                      width: 40,
-                      height: 40,
-                      borderRadius: "50%",
-                      background: session?.team.jerseyColor ?? "var(--ws-gold)",
-                      overflow: "hidden",
-                      flexShrink: 0,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: 20,
-                    }}
-                  >
-                    {session?.avatarBase64 ? (
-                      <img
-                        src={session.avatarBase64}
-                        alt="avatar"
-                        style={{
-                          width: "100%",
-                          height: "100%",
-                          objectFit: "cover",
-                        }}
-                      />
-                    ) : (
-                      "👤"
-                    )}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div
-                      style={{
-                        fontSize: 13,
-                        fontWeight: 700,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {session?.displayName ?? "Manager"}
-                    </div>
-                    <div style={{ fontSize: 11, color: "var(--ws-gold)" }}>
-                      {session?.team.name}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 10,
-                        color: "var(--ink-dim)",
-                        fontFamily: "var(--mono)",
-                      }}
-                    >
-                      {short}
-                    </div>
-                  </div>
-                </div>
-
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
                 <div
                   style={{
-                    marginTop: 10,
-                    padding: "6px 10px",
-                    background: "rgba(255,215,0,0.06)",
-                    borderRadius: 6,
-                    fontSize: 12,
+                    width: 40,
+                    height: 40,
+                    borderRadius: "50%",
+                    background: session?.team.jerseyColor ?? "var(--ws-gold)",
+                    overflow: "hidden",
+                    flexShrink: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 20,
                   }}
                 >
-                  Budget:{" "}
-                  <span
+                  {session?.avatarBase64 ? (
+                    <img
+                      src={session.avatarBase64}
+                      alt="avatar"
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        objectFit: "cover",
+                      }}
+                    />
+                  ) : (
+                    "👤"
+                  )}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
                     style={{
-                      color: "var(--ws-gold)",
-                      fontFamily: "var(--mono)",
+                      fontSize: 13,
+                      fontWeight: 700,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
                     }}
                   >
-                    £{(session?.team.budget ?? 0).toLocaleString()}
-                  </span>
+                    {session?.displayName ?? "Manager"}
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--ws-gold)" }}>
+                    {session?.team.name}
+                  </div>
                 </div>
               </div>
 
-              {/* Menu items */}
-              <div style={{ padding: "6px 0" }}>
-                <DropdownItem
-                  icon="✏️"
-                  label="Edit Profile"
-                  onClick={() => {
-                    setShowProfile(true);
-                    setOpen(false);
-                  }}
-                  hover={subtleHover}
-                />
-                <DropdownItem
-                  icon="🔗"
-                  label="View on Solscan"
-                  onClick={() =>
-                    window.open(
-                      `https://solscan.io/account/${walletAddress}?cluster=devnet`,
-                      "_blank",
-                    )
-                  }
-                  hover={subtleHover}
-                />
-                <div
+              {/* Wallet address + copy button */}
+              <button
+                onClick={copyAddress}
+                {...subtleHover}
+                style={{
+                  marginTop: 10,
+                  width: "100%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "6px 10px",
+                  borderRadius: 6,
+                  background: "var(--panel-bg)",
+                  border: "1px solid var(--border)",
+                  cursor: "pointer",
+                }}
+              >
+                <span
                   style={{
-                    height: 1,
-                    background: "var(--border)",
-                    margin: "6px 0",
+                    fontSize: 11,
+                    color: "var(--ink-dim)",
+                    fontFamily: "var(--mono)",
                   }}
-                />
-                <DropdownItem
-                  icon="🔌"
-                  label="Disconnect Wallet"
-                  onClick={() => {
-                    logout();
-                    setOpen(false);
+                >
+                  {short}
+                </span>
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: copied ? "var(--ws-green-bright)" : "var(--ink-dim)",
                   }}
-                  hover={subtleHover}
-                  danger
-                />
+                >
+                  {copied ? "✓ Copied" : "📋 Copy"}
+                </span>
+              </button>
+
+              <div
+                style={{
+                  marginTop: 8,
+                  padding: "6px 10px",
+                  background: "rgba(255,215,0,0.06)",
+                  borderRadius: 6,
+                  fontSize: 12,
+                }}
+              >
+                Budget:{" "}
+                <span
+                  style={{ color: "var(--ws-gold)", fontFamily: "var(--mono)" }}
+                >
+                  £{(session?.team.budget ?? 0).toLocaleString()}
+                </span>
               </div>
             </div>
-          </>
+
+            <div style={{ padding: "6px 0" }}>
+              <DropdownItem
+                icon="✏️"
+                label="Edit Profile"
+                onClick={() => {
+                  setShowProfile(true);
+                  setOpen(false);
+                }}
+                hover={subtleHover}
+              />
+              <DropdownItem
+                icon="🔗"
+                label="View on Solscan"
+                onClick={() =>
+                  window.open(
+                    `https://solscan.io/account/${walletAddress}?cluster=devnet`,
+                    "_blank",
+                  )
+                }
+                hover={subtleHover}
+              />
+              <div
+                style={{
+                  height: 1,
+                  background: "var(--border)",
+                  margin: "6px 0",
+                }}
+              />
+              <DropdownItem
+                icon="🔌"
+                label="Disconnect Wallet"
+                onClick={() => {
+                  logout();
+                  setOpen(false);
+                }}
+                hover={subtleHover}
+                danger
+              />
+            </div>
+          </div>
         )}
       </div>
 
-      {/* Profile Edit Modal */}
       {showProfile && (
         <ProfileEditModal onClose={() => setShowProfile(false)} />
       )}
@@ -321,24 +377,45 @@ function DropdownItem({
   );
 }
 
+// ─── Profile Edit Modal — full-screen dApp-style overlay ─────────────────────
+
 function ProfileEditModal({ onClose }: { onClose: () => void }) {
-  const { session, updateProfile } = useAuth();
+  const { session, walletAddress, updateProfile, refetch } = useAuth();
   const [displayName, setDisplayName] = useState(session?.displayName ?? "");
   const [teamName, setTeamName] = useState(session?.team.name ?? "");
   const [avatarPreview, setAvatarPreview] = useState<string | null>(
     session?.avatarBase64 ?? null,
   );
   const [saving, setSaving] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
   const ctaHover = useHoverSound("cta");
   const subtleHover = useHoverSound("subtle");
+
+  // Click-outside to close
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (modalRef.current && !modalRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    }
+    function handleEscape(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [onClose]);
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 2_000_000) {
-      setMsg("File too large. Max 2MB.");
+      setMsg({ text: "File too large. Max 2MB.", ok: false });
       return;
     }
     const reader = new FileReader();
@@ -356,252 +433,452 @@ function ProfileEditModal({ onClose }: { onClose: () => void }) {
     });
     setSaving(false);
     if (ok) {
-      setMsg("✓ Saved!");
-      setTimeout(onClose, 900);
-    } else setMsg("Failed to save. Try again.");
+      setMsg({ text: "Profile updated successfully!", ok: true });
+      await refetch(); // auto-refetch session, no manual page reload needed
+      setTimeout(onClose, 1100);
+    } else {
+      setMsg({ text: "Failed to save. Please try again.", ok: false });
+    }
   }
+
+  const shortWallet = walletAddress
+    ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-6)}`
+    : "";
 
   return (
     <>
       {/* Backdrop */}
       <div
-        onClick={onClose}
         style={{
           position: "fixed",
           inset: 0,
           zIndex: 200,
-          background: "rgba(0,0,0,0.7)",
-          backdropFilter: "blur(4px)",
+          background: "rgba(5,7,10,0.85)",
+          backdropFilter: "blur(8px)",
         }}
       />
-      {/* Modal */}
+
+      {/* Full-screen overlay container */}
       <div
         style={{
           position: "fixed",
-          top: "50%",
-          left: "50%",
-          transform: "translate(-50%, -50%)",
+          inset: 0,
           zIndex: 201,
-          width: "min(420px, 94vw)",
-          background: "var(--panel-bg-2)",
-          border: "1px solid var(--border)",
-          borderRadius: 12,
-          overflow: "hidden",
-          boxShadow: "0 24px 64px rgba(0,0,0,0.6)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: 20,
+          overflowY: "auto",
         }}
       >
         <div
+          ref={modalRef}
           style={{
-            padding: "18px 20px",
-            borderBottom: "1px solid var(--border)",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
+            width: "min(720px, 100%)",
+            maxHeight: "92vh",
+            overflowY: "auto",
+            background: "linear-gradient(160deg, #0d1117 0%, #0a0d12 100%)",
+            border: "1px solid rgba(255,215,0,0.2)",
+            borderRadius: 18,
+            boxShadow:
+              "0 0 80px rgba(255,215,0,0.08), 0 30px 80px rgba(0,0,0,0.7)",
+            overflow: "hidden",
           }}
+          className="scroll-thin"
         >
-          <h2
-            style={{
-              fontFamily: "var(--display)",
-              fontSize: "1.1rem",
-              textTransform: "uppercase",
-              margin: 0,
-            }}
-          >
-            Edit Profile
-          </h2>
-          <button
-            onClick={onClose}
-            {...subtleHover}
-            style={{
-              background: "none",
-              border: "none",
-              color: "var(--ink-dim)",
-              cursor: "pointer",
-              fontSize: 18,
-            }}
-          >
-            ✕
-          </button>
-        </div>
-
-        <div
-          style={{
-            padding: 20,
-            display: "flex",
-            flexDirection: "column",
-            gap: 18,
-          }}
-        >
-          {/* Avatar upload */}
+          {/* Header band */}
           <div
             style={{
+              padding: "24px 28px",
+              background:
+                "linear-gradient(135deg, rgba(255,215,0,0.06), transparent)",
+              borderBottom: "1px solid var(--border)",
               display: "flex",
-              flexDirection: "column",
               alignItems: "center",
-              gap: 12,
+              justifyContent: "space-between",
             }}
           >
-            <div
-              onClick={() => fileRef.current?.click()}
+            <div>
+              <div className="ws-badge" style={{ marginBottom: 8 }}>
+                <span className="pulse-ball" />
+                Manager Profile
+              </div>
+              <h2
+                style={{
+                  fontFamily: "var(--display)",
+                  fontSize: "1.5rem",
+                  textTransform: "uppercase",
+                  margin: 0,
+                  letterSpacing: 1,
+                }}
+              >
+                Edit Your Identity
+              </h2>
+            </div>
+            <button
+              onClick={onClose}
+              {...subtleHover}
               style={{
-                width: 90,
-                height: 90,
-                borderRadius: "50%",
-                background: session?.team.jerseyColor ?? "var(--ws-gold)",
-                border: "2px dashed rgba(255,215,0,0.4)",
-                overflow: "hidden",
+                width: 36,
+                height: 36,
+                borderRadius: 8,
+                background: "var(--panel-bg)",
+                border: "1px solid var(--border)",
+                color: "var(--ink-dim)",
                 cursor: "pointer",
+                fontSize: 16,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                fontSize: 32,
-                position: "relative",
               }}
             >
-              {avatarPreview ? (
-                <img
-                  src={avatarPreview}
-                  alt="preview"
-                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                />
-              ) : (
-                "📷"
-              )}
+              ✕
+            </button>
+          </div>
+
+          <div
+            style={{
+              padding: 28,
+              display: "grid",
+              gridTemplateColumns: "220px 1fr",
+              gap: 28,
+            }}
+          >
+            {/* Left: Avatar card */}
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 14,
+              }}
+            >
               <div
+                onClick={() => fileRef.current?.click()}
                 style={{
-                  position: "absolute",
-                  inset: 0,
-                  background: "rgba(0,0,0,0.4)",
+                  width: 160,
+                  height: 160,
+                  borderRadius: "50%",
+                  background: session?.team.jerseyColor ?? "var(--ws-gold)",
+                  border: "3px dashed rgba(255,215,0,0.4)",
+                  overflow: "hidden",
+                  cursor: "pointer",
+                  position: "relative",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  opacity: 0,
-                  transition: "opacity 0.15s",
-                  fontSize: 14,
-                  color: "#fff",
+                  fontSize: 56,
+                  flexShrink: 0,
+                  boxShadow: "0 0 40px rgba(255,215,0,0.15)",
                 }}
-                onMouseEnter={(e) =>
-                  ((e.currentTarget as HTMLElement).style.opacity = "1")
-                }
-                onMouseLeave={(e) =>
-                  ((e.currentTarget as HTMLElement).style.opacity = "0")
-                }
               >
-                Change
+                {avatarPreview ? (
+                  <img
+                    src={avatarPreview}
+                    alt="preview"
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      objectFit: "cover",
+                    }}
+                  />
+                ) : (
+                  "📷"
+                )}
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    background: "rgba(0,0,0,0.5)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    opacity: 0,
+                    transition: "opacity 0.15s",
+                    fontSize: 13,
+                    color: "#fff",
+                    flexDirection: "column",
+                    gap: 4,
+                  }}
+                  onMouseEnter={(e) =>
+                    ((e.currentTarget as HTMLElement).style.opacity = "1")
+                  }
+                  onMouseLeave={(e) =>
+                    ((e.currentTarget as HTMLElement).style.opacity = "0")
+                  }
+                >
+                  <span style={{ fontSize: 22 }}>📤</span>
+                  Change Photo
+                </div>
+              </div>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                onChange={handleFileChange}
+                style={{ display: "none" }}
+              />
+              <span
+                style={{
+                  fontSize: 11,
+                  color: "var(--ink-dim)",
+                  textAlign: "center",
+                }}
+              >
+                Max 2MB · JPG, PNG, GIF
+              </span>
+
+              {/* Club crest preview */}
+              {session?.team.logoSvg && (
+                <div
+                  style={{
+                    marginTop: 8,
+                    padding: 14,
+                    borderRadius: 10,
+                    background: "var(--panel-bg)",
+                    border: "1px solid var(--border)",
+                    width: "100%",
+                    textAlign: "center",
+                  }}
+                >
+                  <div
+                    style={{ width: 56, margin: "0 auto 8px" }}
+                    dangerouslySetInnerHTML={{ __html: session.team.logoSvg }}
+                  />
+                  <div
+                    style={{
+                      fontSize: 10,
+                      color: "var(--ink-dim)",
+                      textTransform: "uppercase",
+                      letterSpacing: 1,
+                    }}
+                  >
+                    Club Crest
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Right: Form fields */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+              {/* Wallet info card */}
+              <div
+                style={{
+                  padding: "12px 16px",
+                  borderRadius: 10,
+                  background: "rgba(153,69,255,0.06)",
+                  border: "1px solid rgba(153,69,255,0.25)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                }}
+              >
+                <span style={{ fontSize: 18 }}>👛</span>
+                <div>
+                  <div
+                    style={{
+                      fontSize: 10,
+                      color: "var(--ink-dim)",
+                      textTransform: "uppercase",
+                      letterSpacing: 1,
+                    }}
+                  >
+                    Connected Wallet
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 13,
+                      fontFamily: "var(--mono)",
+                      color: "#9945FF",
+                    }}
+                  >
+                    {shortWallet}
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label
+                  style={{
+                    fontSize: 11,
+                    color: "var(--ink-dim)",
+                    textTransform: "uppercase",
+                    letterSpacing: 1,
+                    display: "block",
+                    marginBottom: 8,
+                  }}
+                >
+                  Manager Name
+                </label>
+                <input
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  maxLength={30}
+                  placeholder="Your manager name..."
+                  style={{
+                    width: "100%",
+                    padding: "12px 14px",
+                    borderRadius: 8,
+                    background: "var(--panel-bg)",
+                    border: "1px solid var(--border)",
+                    color: "var(--ink)",
+                    fontSize: 14,
+                    boxSizing: "border-box",
+                  }}
+                />
+              </div>
+
+              <div>
+                <label
+                  style={{
+                    fontSize: 11,
+                    color: "var(--ink-dim)",
+                    textTransform: "uppercase",
+                    letterSpacing: 1,
+                    display: "block",
+                    marginBottom: 8,
+                  }}
+                >
+                  Club Name
+                </label>
+                <input
+                  value={teamName}
+                  onChange={(e) => setTeamName(e.target.value)}
+                  maxLength={40}
+                  placeholder="Your club name..."
+                  style={{
+                    width: "100%",
+                    padding: "12px 14px",
+                    borderRadius: 8,
+                    background: "var(--panel-bg)",
+                    border: "1px solid var(--border)",
+                    color: "var(--ink)",
+                    fontSize: 14,
+                    boxSizing: "border-box",
+                  }}
+                />
+              </div>
+
+              {/* Manager stats card */}
+              {session && (
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr 1fr",
+                    gap: 10,
+                    padding: 14,
+                    borderRadius: 10,
+                    background: "var(--panel-bg)",
+                    border: "1px solid var(--border)",
+                  }}
+                >
+                  <StatBlock
+                    label="Level"
+                    value={String(session.managerLevel ?? 1)}
+                  />
+                  <StatBlock
+                    label="Wins"
+                    value={String(session.totalWins ?? 0)}
+                  />
+                  <StatBlock
+                    label="Matches"
+                    value={String(session.totalMatches ?? 0)}
+                  />
+                </div>
+              )}
+
+              {msg && (
+                <div
+                  style={{
+                    padding: "10px 14px",
+                    borderRadius: 8,
+                    fontSize: 13,
+                    background: msg.ok
+                      ? "rgba(46,204,113,0.1)"
+                      : "rgba(255,82,82,0.1)",
+                    border: `1px solid ${msg.ok ? "rgba(46,204,113,0.3)" : "rgba(255,82,82,0.3)"}`,
+                    color: msg.ok ? "var(--ws-green-bright)" : "#ff5252",
+                  }}
+                >
+                  {msg.ok ? "✓ " : "⚠ "}
+                  {msg.text}
+                </div>
+              )}
+
+              <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+                <button
+                  onClick={onClose}
+                  {...subtleHover}
+                  style={{
+                    flex: 1,
+                    padding: "13px",
+                    borderRadius: 8,
+                    border: "1px solid var(--border)",
+                    background: "transparent",
+                    color: "var(--ink-dim)",
+                    fontFamily: "var(--display)",
+                    fontSize: 13,
+                    textTransform: "uppercase",
+                    letterSpacing: 1,
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSave}
+                  disabled={saving}
+                  {...ctaHover}
+                  style={{
+                    flex: 2,
+                    padding: "13px",
+                    borderRadius: 8,
+                    border: "none",
+                    background: saving ? "var(--border)" : "var(--ws-gold)",
+                    color: saving ? "var(--ink-dim)" : "#0a0d12",
+                    fontFamily: "var(--display)",
+                    fontWeight: 700,
+                    fontSize: 13,
+                    textTransform: "uppercase",
+                    letterSpacing: 1.5,
+                    cursor: saving ? "not-allowed" : "pointer",
+                  }}
+                >
+                  {saving ? "Saving..." : "💾 Save Changes"}
+                </button>
               </div>
             </div>
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/*"
-              onChange={handleFileChange}
-              style={{ display: "none" }}
-            />
-            <span style={{ fontSize: 11, color: "var(--ink-dim)" }}>
-              Click to upload avatar (max 2MB)
-            </span>
           </div>
-
-          {/* Display name */}
-          <div>
-            <label
-              style={{
-                fontSize: 11,
-                color: "var(--ink-dim)",
-                textTransform: "uppercase",
-                letterSpacing: 1,
-                display: "block",
-                marginBottom: 6,
-              }}
-            >
-              Manager Name
-            </label>
-            <input
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              maxLength={30}
-              placeholder="Your manager name..."
-              style={{
-                width: "100%",
-                padding: "10px 12px",
-                borderRadius: 6,
-                background: "var(--panel-bg)",
-                border: "1px solid var(--border)",
-                color: "var(--ink)",
-                fontSize: 13,
-                boxSizing: "border-box",
-              }}
-            />
-          </div>
-
-          {/* Team name */}
-          <div>
-            <label
-              style={{
-                fontSize: 11,
-                color: "var(--ink-dim)",
-                textTransform: "uppercase",
-                letterSpacing: 1,
-                display: "block",
-                marginBottom: 6,
-              }}
-            >
-              Club Name
-            </label>
-            <input
-              value={teamName}
-              onChange={(e) => setTeamName(e.target.value)}
-              maxLength={40}
-              placeholder="Your club name..."
-              style={{
-                width: "100%",
-                padding: "10px 12px",
-                borderRadius: 6,
-                background: "var(--panel-bg)",
-                border: "1px solid var(--border)",
-                color: "var(--ink)",
-                fontSize: 13,
-                boxSizing: "border-box",
-              }}
-            />
-          </div>
-
-          {msg && (
-            <div
-              style={{
-                fontSize: 13,
-                color: msg.startsWith("✓")
-                  ? "var(--ws-green-bright)"
-                  : "#ff5252",
-                textAlign: "center",
-              }}
-            >
-              {msg}
-            </div>
-          )}
-
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            {...ctaHover}
-            style={{
-              padding: "12px",
-              borderRadius: 8,
-              border: "none",
-              background: saving ? "var(--border)" : "var(--ws-gold)",
-              color: saving ? "var(--ink-dim)" : "#0a0d12",
-              fontFamily: "var(--display)",
-              fontWeight: 700,
-              fontSize: 14,
-              textTransform: "uppercase",
-              letterSpacing: 1.5,
-              cursor: saving ? "not-allowed" : "pointer",
-            }}
-          >
-            {saving ? "Saving..." : "Save Changes"}
-          </button>
         </div>
       </div>
     </>
+  );
+}
+
+function StatBlock({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ textAlign: "center" }}>
+      <div
+        style={{
+          fontFamily: "var(--mono)",
+          fontSize: "1.2rem",
+          fontWeight: 700,
+          color: "var(--ws-gold)",
+        }}
+      >
+        {value}
+      </div>
+      <div
+        style={{
+          fontSize: 9,
+          color: "var(--ink-dim)",
+          textTransform: "uppercase",
+          letterSpacing: 1,
+          marginTop: 2,
+        }}
+      >
+        {label}
+      </div>
+    </div>
   );
 }

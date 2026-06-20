@@ -3,6 +3,7 @@
 import { useAuth } from "@/lib/auth/useAuth";
 import { useHoverSound } from "@/lib/sound/useHoverSound";
 import { APP_NAME, APP_TAGLINE } from "@/lib/config";
+import { useEffect, useState } from "react";
 
 const FEATURES = [
   {
@@ -37,10 +38,25 @@ const FEATURES = [
   },
 ];
 
+interface GlobalStats {
+  totalClubs: number;
+  totalMatches: number;
+  totalLeagues: number;
+  totalGoals: number;
+}
+
 export default function LandingPage() {
   const { login, loading, error, isPhantomInstalled } = useAuth();
   const ctaHover = useHoverSound("cta");
   const subtleHover = useHoverSound("subtle");
+  const [stats, setStats] = useState<GlobalStats | null>(null);
+
+  useEffect(() => {
+    fetch("/api/stats")
+      .then((r) => r.json())
+      .then(setStats)
+      .catch(() => {}); // silent fail — stats are decorative, not critical
+  }, []);
 
   return (
     <div
@@ -229,6 +245,64 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* Live Global Stats — real data from the platform */}
+      {stats && (
+        <section
+          style={{
+            padding: "0 24px 48px",
+            maxWidth: 1000,
+            margin: "0 auto",
+            width: "100%",
+          }}
+        >
+          <div style={{ textAlign: "center", marginBottom: 28 }}>
+            <div className="eyebrow">Across the World Stage</div>
+            <h2
+              style={{
+                fontFamily: "var(--display)",
+                fontSize: "1.5rem",
+                textTransform: "uppercase",
+              }}
+            >
+              Live Platform Stats
+            </h2>
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+              gap: 14,
+            }}
+          >
+            <LiveStatCard
+              icon="🏟️"
+              value={stats.totalClubs}
+              label="Clubs Founded"
+              color="var(--ws-gold)"
+            />
+            <LiveStatCard
+              icon="⚽"
+              value={stats.totalMatches}
+              label="Matches Played"
+              color="var(--away-color)"
+            />
+            <LiveStatCard
+              icon="🥅"
+              value={stats.totalGoals}
+              label="Goals Scored"
+              color="#ff5252"
+            />
+            <LiveStatCard
+              icon="🏆"
+              value={stats.totalLeagues}
+              label="Leagues Created"
+              color="#4fc3f7"
+            />
+          </div>
+        </section>
+      )}
+
       {/* Stats bar */}
       <div
         style={{
@@ -287,4 +361,83 @@ export default function LandingPage() {
       `}</style>
     </div>
   );
+}
+
+function LiveStatCard({
+  icon,
+  value,
+  label,
+  color,
+}: {
+  icon: string;
+  value: number;
+  label: string;
+  color: string;
+}) {
+  const display = useCountUp(value);
+  const subtleHover = useHoverSound("subtle");
+
+  return (
+    <div
+      className="panel"
+      {...subtleHover}
+      style={{
+        padding: "20px 16px",
+        textAlign: "center",
+        border: `1px solid ${color}33`,
+        background: `${color}08`,
+      }}
+    >
+      <div style={{ fontSize: 28, marginBottom: 8 }}>{icon}</div>
+      <div
+        style={{
+          fontFamily: "var(--mono)",
+          fontSize: "1.8rem",
+          fontWeight: 700,
+          color,
+          textShadow: `0 0 16px ${color}44`,
+        }}
+      >
+        {display.toLocaleString()}
+      </div>
+      <div
+        style={{
+          fontSize: 11,
+          color: "var(--ink-dim)",
+          textTransform: "uppercase",
+          letterSpacing: 1,
+          marginTop: 4,
+        }}
+      >
+        {label}
+      </div>
+    </div>
+  );
+}
+
+/** Animates a number counting up from 0 to target over ~1.2s when it first appears */
+function useCountUp(target: number, duration = 1200): number {
+  const [value, setValue] = useState(0);
+
+  useEffect(() => {
+    if (target === 0) {
+      setValue(0);
+      return;
+    }
+    let raf: number;
+    const start = performance.now();
+
+    function tick(now: number) {
+      const progress = Math.min(1, (now - start) / duration);
+      // Ease-out cubic for a natural deceleration
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setValue(Math.round(eased * target));
+      if (progress < 1) raf = requestAnimationFrame(tick);
+    }
+
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [target, duration]);
+
+  return value;
 }

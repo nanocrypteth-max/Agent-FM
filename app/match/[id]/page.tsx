@@ -106,7 +106,13 @@ function MatchContent() {
     leveledUp: boolean;
     mvpName: string | null;
   } | null>(null);
-  const { play, muted, toggleMute } = useMatchSounds();
+  const { play, muted, toggleMute, startAmbience, stopAmbience } =
+    useMatchSounds();
+
+  // Stop crowd ambience when navigating away from this page
+  useEffect(() => {
+    return () => stopAmbience();
+  }, [stopAmbience]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -198,6 +204,7 @@ function MatchContent() {
       setLiveScore({ home: 0, away: 0 });
       setFeed([]);
       setMatchOver(false);
+      startAmbience(); // begin stadium crowd background loop
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
@@ -221,6 +228,7 @@ function MatchContent() {
         }
         if (ev.type === "FULL_TIME") {
           setMatchOver(true);
+          stopAmbience(); // end stadium crowd background loop
           // Fetch updated session to get EXP gained
           setTimeout(async () => {
             try {
@@ -652,7 +660,11 @@ function MatchContent() {
 
       {/* EXP Popup */}
       {expPopup && (
-        <ExpResultPopup {...expPopup} onClose={() => setExpPopup(null)} />
+        <ExpResultPopup
+          {...expPopup}
+          onClose={() => setExpPopup(null)}
+          onContinue={() => router.push("/")}
+        />
       )}
     </div>
   );
@@ -960,6 +972,7 @@ function ExpResultPopup({
   newLevel,
   mvpName,
   onClose,
+  onContinue,
 }: {
   result: "WIN" | "DRAW" | "LOSS";
   expGained: number;
@@ -968,6 +981,7 @@ function ExpResultPopup({
   leveledUp: boolean;
   mvpName: string | null;
   onClose: () => void;
+  onContinue: () => void;
 }) {
   const cfg = RESULT_CONFIG[result];
   const [visible, setVisible] = useState(false);
@@ -985,15 +999,15 @@ function ExpResultPopup({
     };
   }, []);
 
-  function handleClose() {
+  function handleContinue() {
     setVisible(false);
-    setTimeout(onClose, 300);
+    setTimeout(onContinue, 300);
   }
 
   return (
     <>
       <div
-        onClick={handleClose}
+        onClick={handleContinue}
         style={{
           position: "fixed",
           inset: 0,
@@ -1258,7 +1272,7 @@ function ExpResultPopup({
 
           {/* Close */}
           <button
-            onClick={handleClose}
+            onClick={handleContinue}
             style={{
               width: "100%",
               padding: "13px",
@@ -1276,7 +1290,7 @@ function ExpResultPopup({
               marginTop: 4,
             }}
           >
-            Continue →
+            🏆 Continue to League
           </button>
         </div>
 

@@ -305,11 +305,20 @@ function SquadContent() {
               return (
                 <div
                   key={slotIdx}
-                  onClick={() =>
-                    isEmpty
-                      ? selectedPlayer && assignSlot(slotIdx)
-                      : setSelectedPlayer(occupant!)
-                  }
+                  onClick={() => {
+                    if (selectedPlayer) {
+                      // A player is selected from the bench (or another slot) —
+                      // assign them here, replacing whoever currently occupies this slot.
+                      // The previously selected player's old slot (if any) is cleared
+                      // inside assignSlot, and the bumped occupant (if any) simply
+                      // returns to the bench since slots is keyed by slotIndex.
+                      assignSlot(slotIdx);
+                    } else if (occupant) {
+                      // No one selected yet — clicking an occupied slot selects
+                      // that player so the user can then move them elsewhere.
+                      setSelectedPlayer(occupant);
+                    }
+                  }}
                   style={{
                     position: "absolute",
                     left: `${pos.x}%`,
