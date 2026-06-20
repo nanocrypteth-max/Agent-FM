@@ -458,9 +458,7 @@ function ProfileEditModal({ onClose }: { onClose: () => void }) {
         }}
       />
 
-      {/* Full-screen overlay container — align to flex-start with padding so a
-          tall modal can scroll within the viewport instead of being centered
-          and clipped when its content exceeds the screen height */}
+      {/* Overlay container — medium modal, centered */}
       <div
         style={{
           position: "fixed",
@@ -476,44 +474,41 @@ function ProfileEditModal({ onClose }: { onClose: () => void }) {
         <div
           ref={modalRef}
           style={{
-            width: "min(720px, 100%)",
+            width: "min(560px, 100%)",
             maxHeight: "90vh",
             overflowY: "auto",
-            borderRadius: 18,
+            borderRadius: 16,
             background: "linear-gradient(160deg, #0d1117 0%, #0a0d12 100%)",
             border: "1px solid rgba(255,215,0,0.2)",
             boxShadow:
-              "0 0 80px rgba(255,215,0,0.08), 0 30px 80px rgba(0,0,0,0.7)",
+              "0 0 60px rgba(255,215,0,0.08), 0 24px 64px rgba(0,0,0,0.7)",
             // Note: no overflow:hidden here — it would cancel overflowY:auto
             // above and clip content taller than maxHeight instead of scrolling.
-            // Rounded corners still render correctly because every child element
-            // (header, body) sits flush against the edges with no background
-            // bleed of its own.
           }}
           className="scroll-thin"
         >
           {/* Header band */}
           <div
             style={{
-              padding: "24px 28px",
+              padding: "20px 24px",
               background:
                 "linear-gradient(135deg, rgba(255,215,0,0.06), transparent)",
               borderBottom: "1px solid var(--border)",
-              borderRadius: "18px 18px 0 0",
+              borderRadius: "16px 16px 0 0",
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
             }}
           >
             <div>
-              <div className="ws-badge" style={{ marginBottom: 8 }}>
+              <div className="ws-badge" style={{ marginBottom: 6 }}>
                 <span className="pulse-ball" />
                 Manager Profile
               </div>
               <h2
                 style={{
                   fontFamily: "var(--display)",
-                  fontSize: "1.5rem",
+                  fontSize: "1.25rem",
                   textTransform: "uppercase",
                   margin: 0,
                   letterSpacing: 1,
@@ -526,17 +521,18 @@ function ProfileEditModal({ onClose }: { onClose: () => void }) {
               onClick={onClose}
               {...subtleHover}
               style={{
-                width: 36,
-                height: 36,
+                width: 32,
+                height: 32,
                 borderRadius: 8,
                 background: "var(--panel-bg)",
                 border: "1px solid var(--border)",
                 color: "var(--ink-dim)",
                 cursor: "pointer",
-                fontSize: 16,
+                fontSize: 14,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
+                flexShrink: 0,
               }}
             >
               ✕
@@ -545,27 +541,27 @@ function ProfileEditModal({ onClose }: { onClose: () => void }) {
 
           <div
             style={{
-              padding: 28,
-              display: "grid",
-              gridTemplateColumns: "220px 1fr",
-              gap: 28,
-              borderRadius: "0 0 18px 18px",
+              padding: 24,
+              display: "flex",
+              flexDirection: "column",
+              gap: 18,
+              borderRadius: "0 0 16px 16px",
             }}
           >
-            {/* Left: Avatar card */}
+            {/* Avatar — centered at top */}
             <div
               style={{
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
-                gap: 14,
+                gap: 10,
               }}
             >
               <div
                 onClick={() => fileRef.current?.click()}
                 style={{
-                  width: 160,
-                  height: 160,
+                  width: 110,
+                  height: 110,
                   borderRadius: "50%",
                   background: session?.team.jerseyColor ?? "var(--ws-gold)",
                   border: "3px dashed rgba(255,215,0,0.4)",
@@ -575,9 +571,9 @@ function ProfileEditModal({ onClose }: { onClose: () => void }) {
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  fontSize: 56,
+                  fontSize: 38,
                   flexShrink: 0,
-                  boxShadow: "0 0 40px rgba(255,215,0,0.15)",
+                  boxShadow: "0 0 30px rgba(255,215,0,0.15)",
                 }}
               >
                 {avatarPreview ? (
@@ -603,10 +599,10 @@ function ProfileEditModal({ onClose }: { onClose: () => void }) {
                     justifyContent: "center",
                     opacity: 0,
                     transition: "opacity 0.15s",
-                    fontSize: 13,
+                    fontSize: 11,
                     color: "#fff",
                     flexDirection: "column",
-                    gap: 4,
+                    gap: 3,
                   }}
                   onMouseEnter={(e) =>
                     ((e.currentTarget as HTMLElement).style.opacity = "1")
@@ -615,8 +611,8 @@ function ProfileEditModal({ onClose }: { onClose: () => void }) {
                     ((e.currentTarget as HTMLElement).style.opacity = "0")
                   }
                 >
-                  <span style={{ fontSize: 22 }}>📤</span>
-                  Change Photo
+                  <span style={{ fontSize: 18 }}>📤</span>
+                  Change
                 </div>
               </div>
               <input
@@ -626,235 +622,196 @@ function ProfileEditModal({ onClose }: { onClose: () => void }) {
                 onChange={handleFileChange}
                 style={{ display: "none" }}
               />
-              <span
+              <span style={{ fontSize: 10, color: "var(--ink-dim)" }}>
+                Max 2MB · JPG, PNG, GIF
+              </span>
+            </div>
+
+            {/* Wallet info card */}
+            <div
+              style={{
+                padding: "10px 14px",
+                borderRadius: 10,
+                background: "rgba(153,69,255,0.06)",
+                border: "1px solid rgba(153,69,255,0.25)",
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+              }}
+            >
+              <span style={{ fontSize: 16 }}>👛</span>
+              <div>
+                <div
+                  style={{
+                    fontSize: 9,
+                    color: "var(--ink-dim)",
+                    textTransform: "uppercase",
+                    letterSpacing: 1,
+                  }}
+                >
+                  Connected Wallet
+                </div>
+                <div
+                  style={{
+                    fontSize: 12,
+                    fontFamily: "var(--mono)",
+                    color: "#9945FF",
+                  }}
+                >
+                  {shortWallet}
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <label
                 style={{
                   fontSize: 11,
                   color: "var(--ink-dim)",
-                  textAlign: "center",
+                  textTransform: "uppercase",
+                  letterSpacing: 1,
+                  display: "block",
+                  marginBottom: 6,
                 }}
               >
-                Max 2MB · JPG, PNG, GIF
-              </span>
-
-              {/* Club crest preview */}
-              {session?.team.logoSvg && (
-                <div
-                  style={{
-                    marginTop: 8,
-                    padding: 14,
-                    borderRadius: 10,
-                    background: "var(--panel-bg)",
-                    border: "1px solid var(--border)",
-                    width: "100%",
-                    textAlign: "center",
-                  }}
-                >
-                  <div
-                    style={{ width: 56, margin: "0 auto 8px" }}
-                    dangerouslySetInnerHTML={{ __html: session.team.logoSvg }}
-                  />
-                  <div
-                    style={{
-                      fontSize: 10,
-                      color: "var(--ink-dim)",
-                      textTransform: "uppercase",
-                      letterSpacing: 1,
-                    }}
-                  >
-                    Club Crest
-                  </div>
-                </div>
-              )}
+                Manager Name
+              </label>
+              <input
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                maxLength={30}
+                placeholder="Your manager name..."
+                style={{
+                  width: "100%",
+                  padding: "11px 14px",
+                  borderRadius: 8,
+                  background: "var(--panel-bg)",
+                  border: "1px solid var(--border)",
+                  color: "var(--ink)",
+                  fontSize: 14,
+                  boxSizing: "border-box",
+                }}
+              />
             </div>
 
-            {/* Right: Form fields */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-              {/* Wallet info card */}
-              <div
+            <div>
+              <label
                 style={{
-                  padding: "12px 16px",
-                  borderRadius: 10,
-                  background: "rgba(153,69,255,0.06)",
-                  border: "1px solid rgba(153,69,255,0.25)",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
+                  fontSize: 11,
+                  color: "var(--ink-dim)",
+                  textTransform: "uppercase",
+                  letterSpacing: 1,
+                  display: "block",
+                  marginBottom: 6,
                 }}
               >
-                <span style={{ fontSize: 18 }}>👛</span>
-                <div>
-                  <div
-                    style={{
-                      fontSize: 10,
-                      color: "var(--ink-dim)",
-                      textTransform: "uppercase",
-                      letterSpacing: 1,
-                    }}
-                  >
-                    Connected Wallet
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 13,
-                      fontFamily: "var(--mono)",
-                      color: "#9945FF",
-                    }}
-                  >
-                    {shortWallet}
-                  </div>
-                </div>
-              </div>
+                Club Name
+              </label>
+              <input
+                value={teamName}
+                onChange={(e) => setTeamName(e.target.value)}
+                maxLength={40}
+                placeholder="Your club name..."
+                style={{
+                  width: "100%",
+                  padding: "11px 14px",
+                  borderRadius: 8,
+                  background: "var(--panel-bg)",
+                  border: "1px solid var(--border)",
+                  color: "var(--ink)",
+                  fontSize: 14,
+                  boxSizing: "border-box",
+                }}
+              />
+            </div>
 
-              <div>
-                <label
-                  style={{
-                    fontSize: 11,
-                    color: "var(--ink-dim)",
-                    textTransform: "uppercase",
-                    letterSpacing: 1,
-                    display: "block",
-                    marginBottom: 8,
-                  }}
-                >
-                  Manager Name
-                </label>
-                <input
-                  value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
-                  maxLength={30}
-                  placeholder="Your manager name..."
-                  style={{
-                    width: "100%",
-                    padding: "12px 14px",
-                    borderRadius: 8,
-                    background: "var(--panel-bg)",
-                    border: "1px solid var(--border)",
-                    color: "var(--ink)",
-                    fontSize: 14,
-                    boxSizing: "border-box",
-                  }}
+            {/* Manager stats — compact row */}
+            {session && (
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr 1fr",
+                  gap: 8,
+                  padding: 12,
+                  borderRadius: 10,
+                  background: "var(--panel-bg)",
+                  border: "1px solid var(--border)",
+                }}
+              >
+                <StatBlock
+                  label="Level"
+                  value={String(session.managerLevel ?? 1)}
+                />
+                <StatBlock
+                  label="Wins"
+                  value={String(session.totalWins ?? 0)}
+                />
+                <StatBlock
+                  label="Matches"
+                  value={String(session.totalMatches ?? 0)}
                 />
               </div>
+            )}
 
-              <div>
-                <label
-                  style={{
-                    fontSize: 11,
-                    color: "var(--ink-dim)",
-                    textTransform: "uppercase",
-                    letterSpacing: 1,
-                    display: "block",
-                    marginBottom: 8,
-                  }}
-                >
-                  Club Name
-                </label>
-                <input
-                  value={teamName}
-                  onChange={(e) => setTeamName(e.target.value)}
-                  maxLength={40}
-                  placeholder="Your club name..."
-                  style={{
-                    width: "100%",
-                    padding: "12px 14px",
-                    borderRadius: 8,
-                    background: "var(--panel-bg)",
-                    border: "1px solid var(--border)",
-                    color: "var(--ink)",
-                    fontSize: 14,
-                    boxSizing: "border-box",
-                  }}
-                />
+            {msg && (
+              <div
+                style={{
+                  padding: "10px 14px",
+                  borderRadius: 8,
+                  fontSize: 13,
+                  background: msg.ok
+                    ? "rgba(46,204,113,0.1)"
+                    : "rgba(255,82,82,0.1)",
+                  border: `1px solid ${msg.ok ? "rgba(46,204,113,0.3)" : "rgba(255,82,82,0.3)"}`,
+                  color: msg.ok ? "var(--ws-green-bright)" : "#ff5252",
+                }}
+              >
+                {msg.ok ? "✓ " : "⚠ "}
+                {msg.text}
               </div>
+            )}
 
-              {/* Manager stats card */}
-              {session && (
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr 1fr 1fr",
-                    gap: 10,
-                    padding: 14,
-                    borderRadius: 10,
-                    background: "var(--panel-bg)",
-                    border: "1px solid var(--border)",
-                  }}
-                >
-                  <StatBlock
-                    label="Level"
-                    value={String(session.managerLevel ?? 1)}
-                  />
-                  <StatBlock
-                    label="Wins"
-                    value={String(session.totalWins ?? 0)}
-                  />
-                  <StatBlock
-                    label="Matches"
-                    value={String(session.totalMatches ?? 0)}
-                  />
-                </div>
-              )}
-
-              {msg && (
-                <div
-                  style={{
-                    padding: "10px 14px",
-                    borderRadius: 8,
-                    fontSize: 13,
-                    background: msg.ok
-                      ? "rgba(46,204,113,0.1)"
-                      : "rgba(255,82,82,0.1)",
-                    border: `1px solid ${msg.ok ? "rgba(46,204,113,0.3)" : "rgba(255,82,82,0.3)"}`,
-                    color: msg.ok ? "var(--ws-green-bright)" : "#ff5252",
-                  }}
-                >
-                  {msg.ok ? "✓ " : "⚠ "}
-                  {msg.text}
-                </div>
-              )}
-
-              <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
-                <button
-                  onClick={onClose}
-                  {...subtleHover}
-                  style={{
-                    flex: 1,
-                    padding: "13px",
-                    borderRadius: 8,
-                    border: "1px solid var(--border)",
-                    background: "transparent",
-                    color: "var(--ink-dim)",
-                    fontFamily: "var(--display)",
-                    fontSize: 13,
-                    textTransform: "uppercase",
-                    letterSpacing: 1,
-                    cursor: "pointer",
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSave}
-                  disabled={saving}
-                  {...ctaHover}
-                  style={{
-                    flex: 2,
-                    padding: "13px",
-                    borderRadius: 8,
-                    border: "none",
-                    background: saving ? "var(--border)" : "var(--ws-gold)",
-                    color: saving ? "var(--ink-dim)" : "#0a0d12",
-                    fontFamily: "var(--display)",
-                    fontWeight: 700,
-                    fontSize: 13,
-                    textTransform: "uppercase",
-                    letterSpacing: 1.5,
-                    cursor: saving ? "not-allowed" : "pointer",
-                  }}
-                >
-                  {saving ? "Saving..." : "💾 Save Changes"}
-                </button>
-              </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button
+                onClick={onClose}
+                {...subtleHover}
+                style={{
+                  flex: 1,
+                  padding: "12px",
+                  borderRadius: 8,
+                  border: "1px solid var(--border)",
+                  background: "transparent",
+                  color: "var(--ink-dim)",
+                  fontFamily: "var(--display)",
+                  fontSize: 12,
+                  textTransform: "uppercase",
+                  letterSpacing: 1,
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                {...ctaHover}
+                style={{
+                  flex: 2,
+                  padding: "12px",
+                  borderRadius: 8,
+                  border: "none",
+                  background: saving ? "var(--border)" : "var(--ws-gold)",
+                  color: saving ? "var(--ink-dim)" : "#0a0d12",
+                  fontFamily: "var(--display)",
+                  fontWeight: 700,
+                  fontSize: 12,
+                  textTransform: "uppercase",
+                  letterSpacing: 1.5,
+                  cursor: saving ? "not-allowed" : "pointer",
+                }}
+              >
+                {saving ? "Saving..." : "💾 Save Changes"}
+              </button>
             </div>
           </div>
         </div>
