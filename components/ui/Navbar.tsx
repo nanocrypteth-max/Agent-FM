@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/lib/auth/useAuth";
 import { useHoverSound } from "@/lib/sound/useHoverSound";
 import WalletButton from "@/components/auth/WalletButton";
-import { APP_NAME, APP_TAGLINE } from "@/lib/config";
+import { APP_TAGLINE } from "@/lib/config";
 
 const NAV_ITEMS = [
   { href: "/", label: "League", icon: "🏆" },
@@ -25,11 +26,21 @@ export default function Navbar() {
   return (
     <nav className="ws-navbar">
       <div className="ws-navbar-inner">
-        <div className="ws-navbar-brand">
-          <span className="ws-navbar-logo">⚽</span>
-          <span className="ws-navbar-title">{APP_NAME}</span>
+        <Link
+          href="/"
+          className="ws-navbar-brand"
+          style={{ textDecoration: "none" }}
+        >
+          <Image
+            src="/logo.png"
+            alt="Agent FM"
+            width={150}
+            height={64}
+            priority
+            style={{ height: 40, width: "auto", objectFit: "contain" }}
+          />
           <span className="ws-navbar-badge">{APP_TAGLINE}</span>
-        </div>
+        </Link>
 
         {connected && (
           <div className="ws-navbar-links">

@@ -4,6 +4,7 @@ import { useAuth } from "@/lib/auth/useAuth";
 import { useHoverSound } from "@/lib/sound/useHoverSound";
 import { APP_NAME, APP_TAGLINE } from "@/lib/config";
 import { useEffect, useState } from "react";
+import Image from "next/image";
 
 const FEATURES = [
   {
@@ -75,40 +76,28 @@ export default function LandingPage() {
           position: "relative",
         }}
       >
-        {/* Trophy glow */}
+        {/* Logo */}
         <div
           style={{
-            fontSize: 80,
-            marginBottom: 16,
-            filter: "drop-shadow(0 0 32px rgba(255,215,0,0.5))",
+            marginBottom: 8,
+            filter: "drop-shadow(0 0 40px rgba(255,215,0,0.35))",
             animation: "ws-float 3s ease-in-out infinite",
           }}
         >
-          🏆
+          <Image
+            src="/logo.png"
+            alt={APP_NAME}
+            width={340}
+            height={144}
+            priority
+            style={{ width: "min(340px, 80vw)", height: "auto" }}
+          />
         </div>
 
         <div className="ws-badge" style={{ marginBottom: 16 }}>
           <span className="pulse-ball" />
           {APP_TAGLINE} · Season Open
         </div>
-
-        <h1
-          style={{
-            fontFamily: "var(--display)",
-            fontSize: "clamp(2.4rem, 6vw, 4.5rem)",
-            textTransform: "uppercase",
-            letterSpacing: 2,
-            lineHeight: 1.1,
-            marginBottom: 16,
-            background:
-              "linear-gradient(135deg, var(--ink) 0%, var(--ws-gold) 100%)",
-            WebkitBackgroundClip: "text",
-            WebkitTextFillColor: "transparent",
-            backgroundClip: "text",
-          }}
-        >
-          {APP_NAME}
-        </h1>
 
         <p
           style={{

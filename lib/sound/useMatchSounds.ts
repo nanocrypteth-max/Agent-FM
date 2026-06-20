@@ -3,8 +3,10 @@
 import { useRef, useCallback, useEffect, useState } from "react";
 
 /**
- * Sound URLs — Mixkit (free, no attribution required: https://mixkit.co/license/).
- * VERIFY THESE LINKS ARE STILL LIVE before relying on them — Mixkit occasionally
+ * Sound URLs — Mixkit (free, no attribution required: https://mixkit.co/license/)
+ * for short one-shot effects. Crowd ambience uses a local file under /public/sounds
+ * since it's a longer atmosphere loop, not a quick preview clip.
+ * VERIFY MIXKIT LINKS ARE STILL LIVE before relying on them — Mixkit occasionally
  * reorganizes their CDN paths. If a link breaks, replace with any short MP3/WAV
  * from https://mixkit.co/free-sound-effects/ (search "whistle", "crowd", "kick", "ball").
  */
@@ -17,11 +19,9 @@ const SOUND_URLS = {
     "https://assets.mixkit.co/active_storage/sfx/2570/2570-preview.mp3", // short referee whistle (foul/card)
   kick: "https://assets.mixkit.co/active_storage/sfx/2645/2645-preview.mp3", // football kick / ball strike
   save: "https://assets.mixkit.co/active_storage/sfx/2645/2645-preview.mp3", // glove catch / parry sound (reusing kick as fallback)
-  crowdAmbience:
-    "https://assets.mixkit.co/active_storage/sfx/2515/2515-preview.mp3", // low stadium crowd murmur loop
 };
 
-type SoundKey = keyof typeof SOUND_URLS;
+const CROWD_AMBIENCE_URL = "/sounds/atmosphere-match.mp3"; // local file, ~7.8MB — lazy loaded, see startAmbience()
 
 /**
  * Preloads and plays short sound effects tied to match events.
@@ -33,15 +33,16 @@ type SoundKey = keyof typeof SOUND_URLS;
  *   play("goal");
  */
 export function useMatchSounds() {
-  const audioRefs = useRef<Partial<Record<SoundKey, HTMLAudioElement>>>({});
+  const audioRefs = useRef<
+    Partial<Record<keyof typeof SOUND_URLS, HTMLAudioElement>>
+  >({});
   const ambienceRef = useRef<HTMLAudioElement | null>(null);
   const [muted, setMuted] = useState(false);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    // Preload all one-shot sounds on mount
-    for (const key of Object.keys(SOUND_URLS) as SoundKey[]) {
-      if (key === "crowdAmbience") continue; // handled separately as a loop
+    // Preload all short one-shot sounds on mount — these are small (<100KB each)
+    for (const key of Object.keys(SOUND_URLS) as (keyof typeof SOUND_URLS)[]) {
       const audio = new Audio(SOUND_URLS[key]);
       audio.preload = "auto";
       audio.volume =
@@ -52,15 +53,10 @@ export function useMatchSounds() {
       audioRefs.current[key] = audio;
     }
 
-    // Looping crowd ambience — low volume background atmosphere during live match
-    const ambience = new Audio(SOUND_URLS.crowdAmbience);
-    ambience.loop = true;
-    ambience.volume = 0.08;
-    ambience.preload = "auto";
-    ambience.addEventListener("error", () => {
-      console.warn("[sound] Failed to load crowd ambience");
-    });
-    ambienceRef.current = ambience;
+    // NOTE: crowd ambience is intentionally NOT created here. It's a ~7.8MB file,
+    // so eagerly loading it on every page mount would waste bandwidth for users
+    // who never start a match. It's lazily instantiated inside startAmbience()
+    // the first time it's actually needed.
 
     setReady(true);
 
@@ -71,7 +67,7 @@ export function useMatchSounds() {
   }, []);
 
   const play = useCallback(
-    (key: SoundKey) => {
+    (key: keyof typeof SOUND_URLS) => {
       if (muted) return;
       const audio = audioRefs.current[key];
       if (!audio) return;
@@ -92,11 +88,31 @@ export function useMatchSounds() {
     [muted],
   );
 
-  /** Start the looping stadium ambience (call once when match simulation begins) */
+  /**
+   * Start the looping stadium ambience (call once when match simulation begins).
+   * Lazily creates the Audio element on first call so the 7.8MB file is only
+   * fetched when a match actually starts, not on every page load.
+   */
   const startAmbience = useCallback(() => {
-    if (muted || !ambienceRef.current) return;
+    if (muted) return;
+
+    if (!ambienceRef.current) {
+      const ambience = new Audio(CROWD_AMBIENCE_URL);
+      ambience.loop = true;
+      ambience.volume = 0.1;
+      ambience.preload = "auto";
+      ambience.addEventListener("error", () => {
+        console.warn(
+          `[sound] Failed to load crowd ambience from ${CROWD_AMBIENCE_URL}`,
+        );
+      });
+      ambienceRef.current = ambience;
+    }
+
     ambienceRef.current.currentTime = 0;
-    void ambienceRef.current.play().catch(() => {});
+    void ambienceRef.current.play().catch(() => {
+      // Autoplay may be blocked until user interaction — expected, not an error.
+    });
   }, [muted]);
 
   /** Stop the ambience loop (call on full-time or when leaving the match page) */
@@ -118,7 +134,9 @@ export function useMatchSounds() {
  * Maps a MatchEvent type to a sound effect key. Returns null for events
  * that shouldn't trigger sound.
  */
-export function eventToSound(eventType: string): SoundKey | null {
+export function eventToSound(
+  eventType: string,
+): keyof typeof SOUND_URLS | null {
   switch (eventType) {
     case "KICK_OFF":
       return "kickoff";
