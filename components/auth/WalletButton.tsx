@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useAuth } from "@/lib/auth/useAuth";
 import { useHoverSound } from "@/lib/sound/useHoverSound";
 
@@ -393,6 +394,11 @@ function ProfileEditModal({ onClose }: { onClose: () => void }) {
   const ctaHover = useHoverSound("cta");
   const subtleHover = useHoverSound("subtle");
 
+  // Portal target only exists client-side — guards against SSR mismatch
+  // (document.body isn't available during server rendering).
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
   // Click-outside to close
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -445,7 +451,7 @@ function ProfileEditModal({ onClose }: { onClose: () => void }) {
     ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-6)}`
     : "";
 
-  return (
+  const modalContent = (
     <>
       {/* Backdrop */}
       <div
@@ -818,6 +824,21 @@ function ProfileEditModal({ onClose }: { onClose: () => void }) {
       </div>
     </>
   );
+
+  // Render via portal directly to document.body. This is the key fix: if
+  // ProfileEditModal were rendered inline inside the component tree, any
+  // ancestor with `backdrop-filter` or `filter` (e.g. the `.panel` class
+  // used throughout Squad/Market/etc, which has `backdrop-filter: blur(6px)`)
+  // creates a new CSS containing block. That silently breaks `position: fixed`
+  // for all descendants — instead of covering the full viewport, the backdrop
+  // and modal get clipped to that ancestor's box, which is exactly the
+  // "modal looks cut off / transparent" bug seen on the Squad page. Portaling
+  // to document.body guarantees the modal is always a direct child of <body>,
+  // outside any such filtered ancestor, so position:fixed behaves correctly
+  // no matter which page WalletButton is mounted in.
+  if (!mounted) return null;
+
+  return createPortal(modalContent, document.body);
 }
 
 function StatBlock({ label, value }: { label: string; value: string }) {
