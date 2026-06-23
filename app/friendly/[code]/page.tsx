@@ -604,7 +604,6 @@ function FriendlyRoom() {
                       width: "100%",
                       padding: "11px",
                       borderRadius: 8,
-                      border: "none",
                       background:
                         myPlayers.length >= 12
                           ? "rgba(255,215,0,0.15)"
