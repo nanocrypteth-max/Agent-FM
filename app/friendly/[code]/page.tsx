@@ -5,8 +5,9 @@ import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth/useAuth";
 import AuthWall from "@/components/auth/AuthWall";
 import PitchView from "@/components/pitch/PitchView";
-import { formationToSlots } from "@/lib/match-engine/formations";
+import { formationToSlots, FORMATIONS } from "@/lib/match-engine/formations";
 import type { MatchEvent } from "@/lib/match-engine/types";
+import type { FormationSlot } from "@/lib/match-engine/formations";
 
 interface LobbyData {
   id: string;
@@ -31,16 +32,26 @@ interface LobbyData {
   matchResult: any | null;
 }
 
-const FORMATIONS = [
-  "4-4-2",
-  "4-3-3",
-  "4-2-3-1",
-  "3-5-2",
-  "5-3-2",
-  "4-5-1",
-  "4-4-1-1",
-  "4-3-1-2",
-] as const;
+interface SquadPlayer {
+  id: string;
+  name: string;
+  position: string;
+  starRating: number;
+  pace: number;
+  shooting: number;
+  passing: number;
+  defending: number;
+  stamina: number;
+  avatarSvg: string | null;
+  slotIndex: number | null;
+}
+
+const POS_COLOR: Record<string, string> = {
+  GK: "#ffd700",
+  DF: "#4fc3f7",
+  MF: "#ce93d8",
+  FW: "#ff5252",
+};
 
 export default function FriendlyRoomPage() {
   return (
@@ -56,22 +67,26 @@ function FriendlyRoom() {
   const code = (params.code as string).toUpperCase();
   const { walletAddress, session } = useAuth();
 
+  // Lobby state
   const [lobby, setLobby] = useState<LobbyData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isReady, setIsReady] = useState(false);
   const [simulating, setSimulating] = useState(false);
+
+  // Lineup confirmation state (poin 3 & 4)
+  const [myPlayers, setMyPlayers] = useState<SquadPlayer[]>([]);
   const [selectedFormation, setSelectedFormation] = useState("4-4-2");
-
-  // PitchView player tracking
-  const [homeStartingXI, setHomeStartingXI] = useState<string[]>([]);
-  const [awayStartingXI, setAwayStartingXI] = useState<string[]>([]);
-
-  // EXP popup after match ends
-  const [expPopup, setExpPopup] = useState<{
-    result: "WIN" | "DRAW" | "LOSS";
-    expGained: number;
-  } | null>(null);
+  const [slotMap, setSlotMap] = useState<Map<number, string>>(new Map()); // slotIdx → playerId
+  const [selectedPlayer, setSelectedPlayer] = useState<SquadPlayer | null>(
+    null,
+  );
+  const [lineupConfirmed, setLineupConfirmed] = useState(false);
+  // Track opponent confirmation status for poin 4
+  const [opponentConfirmed, setOpponentConfirmed] = useState(false);
+  const [opponentFormation, setOpponentFormation] = useState<string | null>(
+    null,
+  );
 
   // Match playback state
   const [events, setEvents] = useState<MatchEvent[]>([]);
@@ -79,9 +94,14 @@ function FriendlyRoom() {
   const [liveMinute, setLiveMinute] = useState(0);
   const [matchOver, setMatchOver] = useState(false);
   const [feed, setFeed] = useState<MatchEvent[]>([]);
-  const [pusherInstance, setPusherInstance] = useState<any>(null);
+  const [homeStartingXI, setHomeStartingXI] = useState<string[]>([]);
+  const [awayStartingXI, setAwayStartingXI] = useState<string[]>([]);
+  const [expPopup, setExpPopup] = useState<{
+    result: "WIN" | "DRAW" | "LOSS";
+    expGained: number;
+  } | null>(null);
 
-  // Refs to avoid stale closures in Pusher event handlers
+  // Refs to avoid stale closures in Pusher handlers
   const sessionRef = useRef(session);
   const lobbyRef = useRef(lobby);
   const walletRef = useRef(walletAddress);
@@ -103,7 +123,25 @@ function FriendlyRoom() {
     setLoading(false);
   }, [code]);
 
-  // Initialize Pusher and bind events
+  // Fetch own squad for lineup builder
+  useEffect(() => {
+    if (!walletAddress) return;
+    fetch(`/api/squad?wallet=${walletAddress}`)
+      .then((r) => r.json())
+      .then((d) => {
+        const players = d.players ?? [];
+        setMyPlayers(players);
+        // Pre-populate slotMap from saved squad
+        const map = new Map<number, string>();
+        players.forEach((p: SquadPlayer) => {
+          if (p.slotIndex !== null) map.set(p.slotIndex, p.id);
+        });
+        setSlotMap(map);
+      })
+      .catch(() => {});
+  }, [walletAddress]);
+
+  // Pusher setup
   useEffect(() => {
     const pk = process.env.NEXT_PUBLIC_PUSHER_KEY;
     const cluster = process.env.NEXT_PUBLIC_PUSHER_CLUSTER ?? "ap1";
@@ -127,6 +165,34 @@ function FriendlyRoom() {
         setLobby((prev) => (prev ? { ...prev, guestReady: true } : prev));
       });
 
+      // Poin 4 — opponent confirms lineup
+      channel.bind(
+        "lineup-confirmed",
+        (data: { teamId: string; isHost: boolean; formation: string }) => {
+          const myTeamId = sessionRef.current?.teamId;
+          if (data.teamId !== myTeamId) {
+            // This is the opponent's confirmation
+            setOpponentConfirmed(true);
+            setOpponentFormation(data.formation);
+          }
+        },
+      );
+
+      // both-ready replaces match-start from /ready route
+      // host will call /simulate after receiving this
+      channel.bind("both-ready", (data: { friendlyId: string }) => {
+        const amHost =
+          sessionRef.current?.teamId === lobbyRef.current?.hostTeamId;
+        if (amHost && walletRef.current) {
+          fetch(`/api/friendly/${code}/simulate`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ solanaWallet: walletRef.current }),
+          }).catch(() => {});
+        }
+      });
+
+      // match-start comes from /simulate route with startingXI — initialize PitchView players
       channel.bind(
         "match-start",
         (data: {
@@ -139,16 +205,6 @@ function FriendlyRoom() {
             setHomeStartingXI(data.homeStartingXI);
           if (data.awayStartingXI?.length)
             setAwayStartingXI(data.awayStartingXI);
-          // Host triggers simulate — Redis nx lock prevents double-simulate
-          const amHost =
-            sessionRef.current?.teamId === lobbyRef.current?.hostTeamId;
-          if (amHost && walletRef.current) {
-            fetch(`/api/friendly/${code}/simulate`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ solanaWallet: walletRef.current }),
-            }).catch(() => {});
-          }
         },
       );
 
@@ -171,19 +227,16 @@ function FriendlyRoom() {
         setLiveScore({ home: data.homeScore, away: data.awayScore });
         setMatchOver(true);
         setSimulating(false);
-
-        // Show EXP popup — determine if this client is home or away
         const myTeamId = sessionRef.current?.teamId;
-        if (myTeamId && (data.homeTeamId || data.awayTeamId)) {
+        if (myTeamId) {
           const isHome = myTeamId === data.homeTeamId;
           const myScore = isHome ? data.homeScore : data.awayScore;
           const oppScore = isHome ? data.awayScore : data.homeScore;
           const result: "WIN" | "DRAW" | "LOSS" =
             myScore > oppScore ? "WIN" : myScore < oppScore ? "LOSS" : "DRAW";
           const expGained = isHome ? data.homeExpGained : data.awayExpGained;
-          if (expGained != null) {
+          if (expGained != null)
             setTimeout(() => setExpPopup({ result, expGained }), 1500);
-          }
         }
       });
 
@@ -192,7 +245,7 @@ function FriendlyRoom() {
         setError("Host cancelled the lobby."),
       );
 
-      setPusherInstance(pusher);
+      return channel;
     });
 
     return () => {
@@ -200,7 +253,7 @@ function FriendlyRoom() {
       pusher?.disconnect();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [code]); // intentionally omit pusherInstance — would cause re-subscribe loop
+  }, [code]);
 
   useEffect(() => {
     loadLobby();
@@ -209,30 +262,34 @@ function FriendlyRoom() {
   const isHost = lobby?.hostTeamId === session?.teamId;
   const isGuest = lobby?.guestTeamId === session?.teamId;
   const isParticipant = isHost || isGuest;
+  const pitchSlots = formationToSlots(selectedFormation as any, "HOME");
+  const bench = myPlayers.filter((p) => !new Set(slotMap.values()).has(p.id));
+  const startingXIFromSlots = Array.from(slotMap.values()).slice(0, 11);
 
-  // Squad/formation setup state (poin 6)
-  const [myPlayers, setMyPlayers] = useState<
-    {
-      id: string;
-      name: string;
-      position: string;
-      starRating: number;
-      pace: number;
-      shooting: number;
-      passing: number;
-      defending: number;
-      stamina: number;
-    }[]
-  >([]);
-  const [confirmed, setConfirmed] = useState(false); // must confirm lineup before ready
+  function assignSlot(slotIdx: number) {
+    if (!selectedPlayer) return;
+    const newMap = new Map(slotMap);
+    for (const [si, pid] of newMap.entries()) {
+      if (pid === selectedPlayer.id) newMap.delete(si);
+    }
+    newMap.set(slotIdx, selectedPlayer.id);
+    setSlotMap(newMap);
+    setSelectedPlayer(null);
+  }
 
-  useEffect(() => {
-    if (!walletAddress || !isParticipant || myPlayers.length > 0) return;
-    fetch(`/api/squad?wallet=${walletAddress}`)
-      .then((r) => r.json())
-      .then((d) => setMyPlayers(d.players ?? []))
-      .catch(() => {});
-  }, [walletAddress, isParticipant, myPlayers.length]);
+  async function confirmLineup() {
+    setLineupConfirmed(true);
+    // Notify opponent via Pusher (poin 4)
+    await fetch(`/api/friendly/${code}/lineup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        solanaWallet: walletAddress,
+        formation: selectedFormation,
+        playerIds: startingXIFromSlots,
+      }),
+    });
+  }
 
   async function markReady() {
     setIsReady(true);
@@ -242,9 +299,7 @@ function FriendlyRoom() {
       body: JSON.stringify({ solanaWallet: walletAddress }),
     });
     const data = await res.json();
-
-    // Host also triggers simulate here — covers case where guest was already ready
-    // and host just became last to ready. Pusher match-start covers the reverse.
+    // Host triggers simulate if they're the last to ready
     if (data.bothReady && lobby?.hostTeamId === session?.teamId) {
       setSimulating(true);
       fetch(`/api/friendly/${code}/simulate`, {
@@ -264,9 +319,13 @@ function FriendlyRoom() {
     router.push("/friendly");
   }
 
-  const handleMinuteChange = useCallback((minute: number) => {
-    setLiveMinute(minute);
-  }, []);
+  const handleMinuteChange = useCallback(
+    (minute: number) => setLiveMinute(minute),
+    [],
+  );
+  const homeSlots = formationToSlots("4-4-2", "HOME");
+  const awaySlots = formationToSlots("4-4-2", "AWAY");
+  const showPitch = simulating || matchOver;
 
   if (loading) return <Centered>Loading lobby...</Centered>;
   if (error)
@@ -285,10 +344,6 @@ function FriendlyRoom() {
     );
   if (!lobby) return <Centered>Lobby not found</Centered>;
 
-  const showPitch = simulating || matchOver;
-  const homeSlots = formationToSlots("4-4-2", "HOME");
-  const awaySlots = formationToSlots("4-4-2", "AWAY");
-
   return (
     <div className="page">
       <button
@@ -300,7 +355,7 @@ function FriendlyRoom() {
         <span className="ws-back-arrow">→</span>
       </button>
 
-      {/* Scoreboard header */}
+      {/* Scoreboard */}
       <div className="panel" style={{ padding: "16px 24px", marginBottom: 12 }}>
         <div
           style={{
@@ -362,20 +417,10 @@ function FriendlyRoom() {
         </div>
       </div>
 
-      {/* Lobby state panel */}
+      {/* Pre-match state */}
       {!showPitch && (
-        <div
-          className="panel"
-          style={{ padding: 20, marginBottom: 12, textAlign: "center" }}
-        >
-          {/* Spectator */}
-          {!isParticipant && (
-            <p style={{ color: "var(--ink-dim)", fontSize: 13 }}>
-              Spectating — waiting for players
-            </p>
-          )}
-
-          {/* Host waiting for guest */}
+        <div className="panel" style={{ padding: 20, marginBottom: 12 }}>
+          {/* Host waiting for opponent */}
           {isHost && !lobby.guestTeam && (
             <div
               style={{
@@ -446,261 +491,474 @@ function FriendlyRoom() {
             </div>
           )}
 
-          {/* Formation + squad confirm before ready — poin 6 */}
+          {/* Both in lobby — show lineup builder (poin 3) */}
           {isParticipant && lobby.guestTeam && !isReady && (
             <div
               style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
+                display: "grid",
+                gridTemplateColumns: "1fr 280px",
                 gap: 14,
               }}
             >
-              <p style={{ color: "var(--ink-dim)", fontSize: 13 }}>
-                Both managers present — set your formation and confirm lineup,
-                then mark ready!
-              </p>
-
-              {!confirmed ? (
-                // Step 1: pick formation + see squad summary
-                <div style={{ width: "100%", maxWidth: 480 }}>
-                  <div
+              {/* Left: pitch formation */}
+              <div>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    marginBottom: 10,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <select
+                    value={selectedFormation}
+                    onChange={(e) => {
+                      setSelectedFormation(e.target.value);
+                      setSlotMap(new Map());
+                    }}
                     style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 10,
-                      marginBottom: 12,
-                      justifyContent: "center",
+                      padding: "7px 10px",
+                      borderRadius: 6,
+                      background: "var(--panel-bg)",
+                      border: "1px solid var(--border)",
+                      color: "var(--ink)",
+                      fontSize: 13,
+                      fontFamily: "var(--mono)",
                     }}
                   >
-                    <label
-                      style={{
-                        fontSize: 12,
-                        color: "var(--ink-dim)",
-                        textTransform: "uppercase",
-                        letterSpacing: 1,
-                      }}
-                    >
-                      Formation:
-                    </label>
-                    <select
-                      value={selectedFormation}
-                      onChange={(e) => setSelectedFormation(e.target.value)}
-                      style={{
-                        padding: "8px 12px",
-                        borderRadius: 6,
-                        background: "var(--panel-bg)",
-                        border: "1px solid var(--border)",
-                        color: "var(--ink)",
-                        fontSize: 14,
-                        fontFamily: "var(--mono)",
-                      }}
-                    >
-                      {[
-                        "4-4-2",
-                        "4-3-3",
-                        "4-2-3-1",
-                        "3-5-2",
-                        "5-3-2",
-                        "4-5-1",
-                        "4-4-1-1",
-                        "4-3-1-2",
-                      ].map((f) => (
-                        <option key={f}>{f}</option>
-                      ))}
-                    </select>
+                    {FORMATIONS.map((f) => (
+                      <option key={f}>{f}</option>
+                    ))}
+                  </select>
+
+                  {/* Poin 4: opponent status */}
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: opponentConfirmed
+                        ? "var(--ws-green-bright)"
+                        : "var(--ink-dim)",
+                      padding: "4px 10px",
+                      borderRadius: 10,
+                      border: `1px solid ${opponentConfirmed ? "rgba(46,204,113,0.3)" : "var(--border)"}`,
+                      background: opponentConfirmed
+                        ? "rgba(46,204,113,0.08)"
+                        : "transparent",
+                    }}
+                  >
+                    {opponentConfirmed
+                      ? `✓ Opponent confirmed (${opponentFormation})`
+                      : "⏳ Opponent setting lineup..."}
                   </div>
 
-                  {/* Squad summary — top 11 by stat total */}
+                  <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+                    {!lineupConfirmed ? (
+                      <button
+                        onClick={confirmLineup}
+                        disabled={slotMap.size < 11 || myPlayers.length < 12}
+                        style={{
+                          padding: "7px 16px",
+                          borderRadius: 6,
+                          border: "none",
+                          background:
+                            slotMap.size >= 11 && myPlayers.length >= 12
+                              ? "rgba(255,215,0,0.15)"
+                              : "var(--border)",
+                          color:
+                            slotMap.size >= 11 && myPlayers.length >= 12
+                              ? "var(--ws-gold)"
+                              : "var(--ink-dim)",
+                          fontSize: 12,
+                          fontFamily: "var(--display)",
+                          textTransform: "uppercase",
+                          cursor:
+                            slotMap.size >= 11 && myPlayers.length >= 12
+                              ? "pointer"
+                              : "not-allowed",
+                          outline: `1px solid ${slotMap.size >= 11 && myPlayers.length >= 12 ? "rgba(255,215,0,0.3)" : "transparent"}`,
+                        }}
+                      >
+                        ✓ Confirm Lineup ({slotMap.size}/11)
+                      </button>
+                    ) : (
+                      <button
+                        onClick={markReady}
+                        style={{
+                          padding: "7px 20px",
+                          borderRadius: 6,
+                          border: "none",
+                          background: "var(--ws-gold)",
+                          color: "#0a0d12",
+                          fontSize: 12,
+                          fontFamily: "var(--display)",
+                          fontWeight: 700,
+                          textTransform: "uppercase",
+                          cursor: "pointer",
+                        }}
+                      >
+                        🚀 Ready!
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {lineupConfirmed && (
                   <div
                     style={{
-                      background: "var(--panel-bg)",
-                      borderRadius: 8,
-                      border: "1px solid var(--border)",
-                      overflow: "hidden",
-                      marginBottom: 12,
+                      fontSize: 11,
+                      color: "var(--ws-green-bright)",
+                      marginBottom: 8,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
                     }}
                   >
-                    <div
+                    ✓ Lineup confirmed ({selectedFormation}) — waiting for
+                    opponent...
+                    <button
+                      onClick={() => setLineupConfirmed(false)}
                       style={{
-                        padding: "8px 12px",
                         fontSize: 10,
                         color: "var(--ink-dim)",
-                        textTransform: "uppercase",
-                        letterSpacing: 1,
-                        borderBottom: "1px solid var(--border)",
+                        background: "none",
+                        border: "none",
+                        cursor: "pointer",
+                        textDecoration: "underline",
                       }}
                     >
-                      Starting 11 (auto-selected by rating)
-                    </div>
-                    <div style={{ maxHeight: 220, overflowY: "auto" }}>
-                      {myPlayers.slice(0, 11).map((p, i) => (
+                      Edit
+                    </button>
+                  </div>
+                )}
+
+                {myPlayers.length < 12 && (
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: "#ff9800",
+                      marginBottom: 8,
+                      padding: "6px 10px",
+                      borderRadius: 6,
+                      background: "rgba(255,152,0,0.08)",
+                      border: "1px solid rgba(255,152,0,0.3)",
+                    }}
+                  >
+                    ⚠ Need at least 12 players in squad ({myPlayers.length}{" "}
+                    current)
+                  </div>
+                )}
+
+                {/* Mini pitch */}
+                <div
+                  style={{
+                    position: "relative",
+                    width: "100%",
+                    aspectRatio: "105/68",
+                    background: "linear-gradient(160deg, #1a5c2e, #14452299)",
+                    borderRadius: 6,
+                    overflow: "hidden",
+                  }}
+                >
+                  <svg
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      width: "100%",
+                      height: "100%",
+                      pointerEvents: "none",
+                    }}
+                    viewBox="0 0 105 68"
+                  >
+                    <rect
+                      x="3"
+                      y="3"
+                      width="99"
+                      height="62"
+                      fill="none"
+                      stroke="rgba(255,255,255,0.25)"
+                      strokeWidth="0.7"
+                    />
+                    <line
+                      x1="52.5"
+                      y1="3"
+                      x2="52.5"
+                      y2="65"
+                      stroke="rgba(255,255,255,0.25)"
+                      strokeWidth="0.7"
+                    />
+                    <circle
+                      cx="52.5"
+                      cy="34"
+                      r="9.15"
+                      fill="none"
+                      stroke="rgba(255,255,255,0.25)"
+                      strokeWidth="0.7"
+                    />
+                    <rect
+                      x="3"
+                      y="15"
+                      width="16.5"
+                      height="38"
+                      fill="none"
+                      stroke="rgba(255,255,255,0.2)"
+                      strokeWidth="0.6"
+                    />
+                    <rect
+                      x="85.5"
+                      y="15"
+                      width="16.5"
+                      height="38"
+                      fill="none"
+                      stroke="rgba(255,255,255,0.2)"
+                      strokeWidth="0.6"
+                    />
+                  </svg>
+
+                  {pitchSlots.map((slot, slotIdx) => {
+                    const occupantId = slotMap.get(slotIdx);
+                    const occupant = myPlayers.find((p) => p.id === occupantId);
+                    const isSelected =
+                      !!selectedPlayer && occupant?.id === selectedPlayer.id;
+
+                    return (
+                      <div
+                        key={slotIdx}
+                        onClick={() => {
+                          if (selectedPlayer) {
+                            if (occupant?.id === selectedPlayer.id)
+                              setSelectedPlayer(null);
+                            else assignSlot(slotIdx);
+                          } else if (occupant) {
+                            setSelectedPlayer(occupant);
+                          }
+                        }}
+                        style={{
+                          position: "absolute",
+                          left: `${slot.x}%`,
+                          top: `${slot.y}%`,
+                          transform: "translate(-50%,-50%)",
+                          width: 44,
+                          height: 52,
+                          cursor: "pointer",
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
+                          gap: 1,
+                          zIndex: isSelected ? 2 : 1,
+                        }}
+                      >
                         <div
-                          key={p.id}
                           style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 10,
-                            padding: "7px 12px",
-                            borderBottom:
-                              i < 10 ? "1px solid var(--border)" : "none",
+                            fontSize: 8,
+                            fontWeight: 700,
+                            color: POS_COLOR[slot.posGroup] || "#fff",
+                            background: "rgba(0,0,0,0.7)",
+                            padding: "1px 4px",
+                            borderRadius: 3,
                           }}
                         >
-                          <span
+                          {(slot as FormationSlot).label ?? slot.posGroup}
+                        </div>
+                        {occupant ? (
+                          <>
+                            <div
+                              style={{
+                                width: 30,
+                                height: 30,
+                                borderRadius: "50%",
+                                background: lobby.hostTeam.jerseyColor,
+                                border: isSelected
+                                  ? "2.5px solid var(--ws-gold)"
+                                  : "2px solid rgba(255,255,255,0.85)",
+                                overflow: "hidden",
+                                boxShadow: isSelected
+                                  ? "0 0 10px rgba(255,215,0,0.5)"
+                                  : "0 2px 6px rgba(0,0,0,0.5)",
+                              }}
+                              dangerouslySetInnerHTML={{
+                                __html: occupant.avatarSvg ?? "",
+                              }}
+                            />
+                            <span
+                              style={{
+                                fontSize: 7,
+                                color: "#fff",
+                                background: "rgba(0,0,0,0.7)",
+                                padding: "1px 3px",
+                                borderRadius: 2,
+                                maxWidth: 40,
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {occupant.name.split(" ").slice(-1)[0]}
+                            </span>
+                          </>
+                        ) : (
+                          <div
                             style={{
-                              fontSize: 10,
-                              color: "var(--ink-dim)",
-                              width: 16,
+                              width: 28,
+                              height: 28,
+                              borderRadius: "50%",
+                              background: selectedPlayer
+                                ? "rgba(255,215,0,0.15)"
+                                : "rgba(255,255,255,0.06)",
+                              border: selectedPlayer
+                                ? "2px dashed rgba(255,215,0,0.6)"
+                                : "2px dashed rgba(255,255,255,0.2)",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
                             }}
                           >
-                            {i + 1}
-                          </span>
-                          <div
-                            style={{ flex: 1, fontSize: 12, fontWeight: 500 }}
-                          >
-                            {p.name}
+                            {selectedPlayer && (
+                              <span
+                                style={{
+                                  color: "rgba(255,215,0,0.8)",
+                                  fontSize: 12,
+                                }}
+                              >
+                                +
+                              </span>
+                            )}
                           </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Right: bench/player list */}
+              <div style={{ display: "flex", flexDirection: "column" }}>
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: "var(--ink-dim)",
+                    textTransform: "uppercase",
+                    letterSpacing: 1,
+                    marginBottom: 6,
+                    display: "flex",
+                    justifyContent: "space-between",
+                  }}
+                >
+                  <span>Bench ({bench.length})</span>
+                  <span
+                    style={{
+                      color:
+                        slotMap.size === 11
+                          ? "var(--ws-green-bright)"
+                          : "var(--ws-gold)",
+                    }}
+                  >
+                    {slotMap.size}/11
+                  </span>
+                </div>
+                <div
+                  className="scroll-thin"
+                  style={{
+                    flex: 1,
+                    overflowY: "auto",
+                    maxHeight: 380,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 3,
+                  }}
+                >
+                  {bench.map((p) => (
+                    <div
+                      key={p.id}
+                      onClick={() =>
+                        setSelectedPlayer(
+                          selectedPlayer?.id === p.id ? null : p,
+                        )
+                      }
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        padding: "6px 8px",
+                        borderRadius: 6,
+                        cursor: "pointer",
+                        background:
+                          selectedPlayer?.id === p.id
+                            ? "rgba(255,215,0,0.1)"
+                            : "transparent",
+                        border:
+                          selectedPlayer?.id === p.id
+                            ? "1px solid rgba(255,215,0,0.4)"
+                            : "1px solid transparent",
+                        transition: "all 0.12s",
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: 28,
+                          height: 28,
+                          flexShrink: 0,
+                          borderRadius: "50%",
+                          overflow: "hidden",
+                          border: "1px solid var(--border)",
+                        }}
+                        dangerouslySetInnerHTML={{ __html: p.avatarSvg ?? "" }}
+                      />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div
+                          style={{
+                            fontSize: 11,
+                            fontWeight: 600,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {p.name}
+                        </div>
+                        <div style={{ fontSize: 9, color: "var(--ink-dim)" }}>
                           <span
                             style={{
-                              fontSize: 9,
-                              padding: "1px 6px",
-                              borderRadius: 3,
-                              background: "rgba(255,255,255,0.06)",
-                              color: "var(--ink-dim)",
+                              padding: "1px 4px",
+                              borderRadius: 2,
+                              background: `${POS_COLOR[p.position] || "#888"}22`,
+                              color: POS_COLOR[p.position] || "#888",
+                              fontWeight: 700,
+                              marginRight: 4,
                             }}
                           >
                             {p.position}
                           </span>
-                          <span
-                            style={{
-                              fontSize: 10,
-                              color: "var(--ws-gold)",
-                              fontFamily: "var(--mono)",
-                            }}
-                          >
-                            {p.pace}/{p.shooting}/{p.passing}
-                          </span>
+                          {"★".repeat(p.starRating)}
                         </div>
-                      ))}
-                      {myPlayers.length === 0 && (
-                        <p
-                          style={{
-                            padding: "12px",
-                            fontSize: 12,
-                            color: "var(--ink-dim)",
-                            textAlign: "center",
-                          }}
-                        >
-                          Loading squad...
-                        </p>
-                      )}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 9,
+                          fontFamily: "var(--mono)",
+                          color: "var(--ws-gold)",
+                        }}
+                      >
+                        {p.pace}/{p.shooting}/{p.passing}
+                      </div>
                     </div>
-                  </div>
-
-                  <button
-                    onClick={() => setConfirmed(true)}
-                    disabled={myPlayers.length < 12}
-                    style={{
-                      width: "100%",
-                      padding: "11px",
-                      borderRadius: 8,
-                      background:
-                        myPlayers.length >= 12
-                          ? "rgba(255,215,0,0.15)"
-                          : "var(--border)",
-                      color:
-                        myPlayers.length >= 12
-                          ? "var(--ws-gold)"
-                          : "var(--ink-dim)",
-                      fontFamily: "var(--display)",
-                      fontWeight: 700,
-                      fontSize: 13,
-                      textTransform: "uppercase",
-                      letterSpacing: 1,
-                      cursor:
-                        myPlayers.length >= 12 ? "pointer" : "not-allowed",
-                      border: `1px solid ${myPlayers.length >= 12 ? "rgba(255,215,0,0.4)" : "var(--border)"}`,
-                    }}
-                  >
-                    {myPlayers.length < 12
-                      ? `⚠ Need at least 12 players (have ${myPlayers.length})`
-                      : `✓ Confirm Lineup (${selectedFormation})`}
-                  </button>
+                  ))}
                 </div>
-              ) : (
-                // Step 2: lineup confirmed, show ready button
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    gap: 10,
-                  }}
-                >
-                  <div
-                    style={{
-                      fontSize: 12,
-                      color: "var(--ws-green-bright)",
-                      padding: "6px 16px",
-                      borderRadius: 20,
-                      background: "rgba(46,204,113,0.1)",
-                      border: "1px solid rgba(46,204,113,0.3)",
-                    }}
-                  >
-                    ✓ Lineup confirmed — {selectedFormation}
-                  </div>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button
-                      onClick={() => setConfirmed(false)}
-                      style={{
-                        padding: "10px 18px",
-                        borderRadius: 8,
-                        border: "1px solid var(--border)",
-                        background: "transparent",
-                        color: "var(--ink-dim)",
-                        cursor: "pointer",
-                        fontSize: 12,
-                        fontFamily: "var(--display)",
-                        textTransform: "uppercase",
-                      }}
-                    >
-                      ← Edit
-                    </button>
-                    <button
-                      onClick={markReady}
-                      style={{
-                        padding: "12px 32px",
-                        borderRadius: 8,
-                        border: "none",
-                        background: "var(--ws-gold)",
-                        color: "#0a0d12",
-                        fontFamily: "var(--display)",
-                        fontWeight: 700,
-                        fontSize: 14,
-                        textTransform: "uppercase",
-                        cursor: "pointer",
-                      }}
-                    >
-                      ✓ Ready!
-                    </button>
-                  </div>
-                </div>
-              )}
+              </div>
             </div>
           )}
 
-          {/* Waiting for other player after marking ready */}
-          {(isReady && !lobby.hostReady) || (isReady && !lobby.guestReady) ? (
-            <p style={{ color: "var(--ws-green-bright)", marginTop: 8 }}>
+          {isReady && !matchOver && (
+            <p style={{ color: "var(--ws-green-bright)", textAlign: "center" }}>
               ✓ You&apos;re ready — waiting for {isHost ? "opponent" : "host"}
               ...
             </p>
-          ) : null}
+          )}
 
-          {/* Both ready — about to start */}
           {lobby.hostReady && lobby.guestReady && !simulating && (
             <div
               style={{
+                textAlign: "center",
                 marginTop: 8,
                 fontSize: 13,
                 color: "var(--ws-green-bright)",
@@ -724,7 +982,7 @@ function FriendlyRoom() {
         </div>
       )}
 
-      {/* Live pitch + commentary */}
+      {/* Live pitch */}
       {showPitch && (
         <div
           style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 12 }}
@@ -802,7 +1060,7 @@ function FriendlyRoom() {
                       : ev.type === "SAVE"
                         ? "🧤 Save"
                         : ev.type === "YELLOW_CARD"
-                          ? "🟨 Yellow card"
+                          ? "🟨 Yellow"
                           : ev.type === "SHOT"
                             ? "🎯 Shot"
                             : ev.type === "HALF_TIME"
@@ -816,7 +1074,6 @@ function FriendlyRoom() {
         </div>
       )}
 
-      {/* Full time result */}
       {matchOver && (
         <div
           className="panel"
@@ -860,6 +1117,184 @@ function FriendlyRoom() {
         />
       )}
     </div>
+  );
+}
+
+const RESULT_CFG = {
+  WIN: {
+    emoji: "🏆",
+    label: "Victory!",
+    color: "#ffd700",
+    glow: "rgba(255,215,0,0.4)",
+  },
+  DRAW: {
+    emoji: "🤝",
+    label: "Draw",
+    color: "#4fc3f7",
+    glow: "rgba(79,195,247,0.3)",
+  },
+  LOSS: {
+    emoji: "💔",
+    label: "Defeat",
+    color: "#ff5252",
+    glow: "rgba(255,82,82,0.3)",
+  },
+};
+
+function FriendlyExpPopup({
+  result,
+  expGained,
+  onClose,
+}: {
+  result: "WIN" | "DRAW" | "LOSS";
+  expGained: number;
+  onClose: () => void;
+}) {
+  const cfg = RESULT_CFG[result];
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setVisible(true), 50);
+    return () => clearTimeout(t);
+  }, []);
+  function close() {
+    setVisible(false);
+    setTimeout(onClose, 250);
+  }
+  return (
+    <>
+      <div
+        onClick={close}
+        style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 300,
+          background: "rgba(0,0,0,0.7)",
+          backdropFilter: "blur(4px)",
+          opacity: visible ? 1 : 0,
+          transition: "opacity 0.25s",
+        }}
+      />
+      <div
+        style={{
+          position: "fixed",
+          top: "50%",
+          left: "50%",
+          transform: visible
+            ? "translate(-50%,-50%) scale(1)"
+            : "translate(-50%,-50%) scale(0.88)",
+          zIndex: 301,
+          width: "min(360px, 90vw)",
+          background: "linear-gradient(160deg, #0d1117, #0a0d12)",
+          border: `1px solid ${cfg.color}44`,
+          borderRadius: 14,
+          overflow: "hidden",
+          boxShadow: `0 0 40px ${cfg.glow}`,
+          opacity: visible ? 1 : 0,
+          transition: "all 0.3s cubic-bezier(0.34,1.56,0.64,1)",
+        }}
+      >
+        <div
+          style={{
+            height: 3,
+            background: `linear-gradient(90deg, transparent, ${cfg.color}, transparent)`,
+          }}
+        />
+        <div style={{ padding: "24px 22px", textAlign: "center" }}>
+          <div
+            style={{
+              fontSize: 52,
+              marginBottom: 8,
+              filter: `drop-shadow(0 0 16px ${cfg.glow})`,
+              animation:
+                "exp-bounce 0.5s cubic-bezier(0.34,1.56,0.64,1) 0.1s both",
+            }}
+          >
+            {cfg.emoji}
+          </div>
+          <div
+            style={{
+              fontFamily: "var(--display)",
+              fontSize: "1.7rem",
+              textTransform: "uppercase",
+              letterSpacing: 2,
+              color: cfg.color,
+              marginBottom: 4,
+            }}
+          >
+            {cfg.label}
+          </div>
+          <div
+            style={{
+              fontSize: 10,
+              color: "var(--ink-dim)",
+              marginBottom: 18,
+              letterSpacing: 1,
+            }}
+          >
+            FRIENDLY MATCH
+          </div>
+          <div
+            style={{
+              background: "rgba(255,255,255,0.04)",
+              border: "1px solid rgba(255,255,255,0.08)",
+              borderRadius: 10,
+              padding: "14px 18px",
+              marginBottom: 14,
+            }}
+          >
+            <div
+              style={{
+                fontSize: 10,
+                color: "var(--ink-dim)",
+                textTransform: "uppercase",
+                letterSpacing: 2,
+                marginBottom: 8,
+              }}
+            >
+              Manager EXP Earned
+            </div>
+            <div
+              style={{
+                fontFamily: "var(--mono)",
+                fontSize: "2rem",
+                fontWeight: 700,
+                color: cfg.color,
+              }}
+            >
+              +{expGained}{" "}
+              <span style={{ fontSize: "0.8rem", color: "var(--ink-dim)" }}>
+                EXP
+              </span>
+            </div>
+            <div
+              style={{ fontSize: 10, color: "var(--ink-dim)", marginTop: 4 }}
+            >
+              Friendly awards reduced EXP
+            </div>
+          </div>
+          <button
+            onClick={close}
+            style={{
+              width: "100%",
+              padding: "11px",
+              borderRadius: 8,
+              border: "none",
+              background: `linear-gradient(135deg, ${cfg.color}bb, ${cfg.color})`,
+              color: "#0a0d12",
+              fontFamily: "var(--display)",
+              fontWeight: 700,
+              fontSize: 12,
+              textTransform: "uppercase",
+              letterSpacing: 2,
+              cursor: "pointer",
+            }}
+          >
+            Back to Lobbies
+          </button>
+        </div>
+        <style>{`@keyframes exp-bounce { from { transform: scale(0.3); opacity: 0; } to { transform: scale(1); opacity: 1; } }`}</style>
+      </div>
+    </>
   );
 }
 
@@ -918,197 +1353,6 @@ function TeamChip({
         )}
       </div>
     </div>
-  );
-}
-
-const RESULT_CFG = {
-  WIN: {
-    emoji: "🏆",
-    label: "Victory!",
-    color: "#ffd700",
-    glow: "rgba(255,215,0,0.4)",
-  },
-  DRAW: {
-    emoji: "🤝",
-    label: "Draw",
-    color: "#4fc3f7",
-    glow: "rgba(79,195,247,0.3)",
-  },
-  LOSS: {
-    emoji: "💔",
-    label: "Defeat",
-    color: "#ff5252",
-    glow: "rgba(255,82,82,0.3)",
-  },
-};
-
-function FriendlyExpPopup({
-  result,
-  expGained,
-  onClose,
-}: {
-  result: "WIN" | "DRAW" | "LOSS";
-  expGained: number;
-  onClose: () => void;
-}) {
-  const cfg = RESULT_CFG[result];
-  const [visible, setVisible] = useState(false);
-  useEffect(() => {
-    const t = setTimeout(() => setVisible(true), 50);
-    return () => clearTimeout(t);
-  }, []);
-
-  function close() {
-    setVisible(false);
-    setTimeout(onClose, 250);
-  }
-
-  return (
-    <>
-      <div
-        onClick={close}
-        style={{
-          position: "fixed",
-          inset: 0,
-          zIndex: 300,
-          background: "rgba(0,0,0,0.7)",
-          backdropFilter: "blur(4px)",
-          opacity: visible ? 1 : 0,
-          transition: "opacity 0.25s",
-        }}
-      />
-      <div
-        style={{
-          position: "fixed",
-          top: "50%",
-          left: "50%",
-          transform: visible
-            ? "translate(-50%,-50%) scale(1)"
-            : "translate(-50%,-50%) scale(0.88)",
-          zIndex: 301,
-          width: "min(380px, 90vw)",
-          background: "linear-gradient(160deg, #0d1117, #0a0d12)",
-          border: `1px solid ${cfg.color}44`,
-          borderRadius: 14,
-          overflow: "hidden",
-          boxShadow: `0 0 40px ${cfg.glow}, 0 20px 50px rgba(0,0,0,0.6)`,
-          opacity: visible ? 1 : 0,
-          transition: "all 0.3s cubic-bezier(0.34,1.56,0.64,1)",
-        }}
-      >
-        <div
-          style={{
-            height: 3,
-            background: `linear-gradient(90deg, transparent, ${cfg.color}, transparent)`,
-          }}
-        />
-        <div style={{ padding: "28px 24px", textAlign: "center" }}>
-          <div
-            style={{
-              fontSize: 56,
-              marginBottom: 8,
-              filter: `drop-shadow(0 0 16px ${cfg.glow})`,
-              animation:
-                "exp-bounce 0.5s cubic-bezier(0.34,1.56,0.64,1) 0.1s both",
-            }}
-          >
-            {cfg.emoji}
-          </div>
-          <div
-            style={{
-              fontFamily: "var(--display)",
-              fontSize: "1.8rem",
-              textTransform: "uppercase",
-              letterSpacing: 2,
-              color: cfg.color,
-              marginBottom: 6,
-            }}
-          >
-            {cfg.label}
-          </div>
-          <div
-            style={{
-              fontSize: 11,
-              color: "var(--ink-dim)",
-              marginBottom: 20,
-              letterSpacing: 1,
-            }}
-          >
-            FRIENDLY MATCH
-          </div>
-          <div
-            style={{
-              background: "rgba(255,255,255,0.04)",
-              border: "1px solid rgba(255,255,255,0.08)",
-              borderRadius: 10,
-              padding: "14px 18px",
-              marginBottom: 16,
-            }}
-          >
-            <div
-              style={{
-                fontSize: 10,
-                color: "var(--ink-dim)",
-                textTransform: "uppercase",
-                letterSpacing: 2,
-                marginBottom: 8,
-              }}
-            >
-              Manager EXP Earned
-            </div>
-            <div
-              style={{
-                fontFamily: "var(--mono)",
-                fontSize: "2rem",
-                fontWeight: 700,
-                color: cfg.color,
-              }}
-            >
-              +{expGained}{" "}
-              <span
-                style={{
-                  fontSize: "0.9rem",
-                  color: "var(--ink-dim)",
-                  fontFamily: "var(--display)",
-                }}
-              >
-                EXP
-              </span>
-            </div>
-            <div
-              style={{ fontSize: 10, color: "var(--ink-dim)", marginTop: 6 }}
-            >
-              Friendly matches award reduced EXP
-            </div>
-          </div>
-          <button
-            onClick={close}
-            style={{
-              width: "100%",
-              padding: "11px",
-              borderRadius: 8,
-              border: "none",
-              background: `linear-gradient(135deg, ${cfg.color}bb, ${cfg.color})`,
-              color: "#0a0d12",
-              fontFamily: "var(--display)",
-              fontWeight: 700,
-              fontSize: 13,
-              textTransform: "uppercase",
-              letterSpacing: 2,
-              cursor: "pointer",
-            }}
-          >
-            Back to Lobbies
-          </button>
-        </div>
-        <style>{`
-          @keyframes exp-bounce {
-            from { transform: scale(0.3); opacity: 0; }
-            to   { transform: scale(1);   opacity: 1; }
-          }
-        `}</style>
-      </div>
-    </>
   );
 }
 

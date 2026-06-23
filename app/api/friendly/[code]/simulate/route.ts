@@ -119,7 +119,7 @@ export async function POST(
 
     const result = simulateMatch(simInput, lobby.id);
 
-    // Broadcast starting XIs before streaming events so PitchView can initialize players
+    // Send startingXI first so PitchView initializes players before any events arrive
     const channel = CHANNELS.friendly(code);
     await pusher.trigger(channel, EVENTS.MATCH_START, {
       friendlyId: lobby.id,
@@ -127,14 +127,17 @@ export async function POST(
       awayStartingXI: guestTactics.startingXI,
     });
 
-    // Stream match events via Pusher in batches of 5
-    const BATCH = 5;
+    // Brief pause so client processes MATCH_START and inits playersRef before events
+    await new Promise((r) => setTimeout(r, 800));
+
+    // Stream events in small batches — PitchView consumes them via its own
+    // minuteGap-based timer (max 1600ms between events), so all events can arrive
+    // in DB while PitchView plays them back at natural pace from its queue.
+    const BATCH = 3;
     for (let i = 0; i < result.events.length; i += BATCH) {
       const batch = result.events.slice(i, i + BATCH);
       await pusher.trigger(channel, EVENTS.MATCH_EVENT, { events: batch });
-
-      // Small delay between batches so frontend can animate
-      await new Promise((r) => setTimeout(r, 200));
+      await new Promise((r) => setTimeout(r, 300));
     }
 
     // Save match result

@@ -30,11 +30,13 @@ export const EVENTS = {
   GUEST_JOINED: "guest-joined",
   HOST_READY: "host-ready",
   GUEST_READY: "guest-ready",
-  MATCH_START: "match-start",
+  BOTH_READY: "both-ready", // replaces MATCH_START from ready route
+  LINEUP_CONFIRMED: "lineup-confirmed", // user confirmed squad/formation
+  MATCH_START: "match-start", // only sent by simulate route (includes startingXI)
   LOBBY_EXPIRED: "lobby-expired",
   LOBBY_CANCELLED: "lobby-cancelled",
 
-  // Match events (streamed one by one)
+  // Match events
   MATCH_EVENT: "match-event",
   MATCH_SCORE: "match-score",
   MATCH_END: "match-end",
