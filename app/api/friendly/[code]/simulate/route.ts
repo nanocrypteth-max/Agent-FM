@@ -53,6 +53,24 @@ export async function POST(
     return NextResponse.json({ error: "No guest team" }, { status: 400 });
   }
 
+  const MIN_PLAYERS = 12;
+  if (lobby.hostTeam.players.length < MIN_PLAYERS) {
+    return NextResponse.json(
+      {
+        error: `${lobby.hostTeam.name} needs at least ${MIN_PLAYERS} players to play.`,
+      },
+      { status: 400 },
+    );
+  }
+  if (lobby.guestTeam.players.length < MIN_PLAYERS) {
+    return NextResponse.json(
+      {
+        error: `${lobby.guestTeam.name} needs at least ${MIN_PLAYERS} players to play.`,
+      },
+      { status: 400 },
+    );
+  }
+
   // Distributed lock: prevent double-simulate
   const lockKey = KEYS.matchLock(lobby.id);
   const acquired = await redis.set(lockKey, "1", { nx: true, ex: 120 });

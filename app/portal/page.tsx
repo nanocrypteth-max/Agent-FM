@@ -13,6 +13,7 @@ interface Message {
   metadata?: any;
 }
 
+// All possible types including TRAINING/EXP/FRIENDLY that were missing before
 const TYPE_CONFIG: Record<
   string,
   { icon: string; color: string; label: string }
@@ -22,7 +23,20 @@ const TYPE_CONFIG: Record<
   LEAGUE: { icon: "🏆", color: "var(--ws-green-bright)", label: "League" },
   GACHA: { icon: "🎰", color: "#ce93d8", label: "Gacha" },
   SYSTEM: { icon: "⚙️", color: "var(--ink-dim)", label: "System" },
+  TRAINING: { icon: "💪", color: "#4fc3f7", label: "Training" },
+  EXP: { icon: "⭐", color: "#ffd700", label: "EXP" },
+  FRIENDLY: { icon: "🤝", color: "#81c784", label: "Friendly" },
 };
+
+// Format: MM/dd/yyyy
+function fmtDate(iso: string) {
+  const d = new Date(iso);
+  return `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}/${d.getFullYear()}`;
+}
+function fmtDateTime(iso: string) {
+  const d = new Date(iso);
+  return `${fmtDate(iso)} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
 
 export default function PortalPage() {
   return (
@@ -43,6 +57,11 @@ function PortalContent() {
     loadMessages();
   }, []);
 
+  // Clear selected when changing filter — poin 3
+  useEffect(() => {
+    setSelected(null);
+  }, [filter]);
+
   async function loadMessages() {
     setLoading(true);
     const res = await fetch("/api/portal");
@@ -53,14 +72,15 @@ function PortalContent() {
   }
 
   async function markRead(id?: string) {
-    const url = id ? `/api/portal?id=${id}` : "/api/portal";
-    await fetch(url, { method: "PATCH" });
+    await fetch(id ? `/api/portal?id=${id}` : "/api/portal", {
+      method: "PATCH",
+    });
     setMessages((prev) =>
       id
         ? prev.map((m) => (m.id === id ? { ...m, isRead: true } : m))
         : prev.map((m) => ({ ...m, isRead: true })),
     );
-    setUnread(0);
+    if (!id) setUnread(0);
   }
 
   async function openMessage(msg: Message) {
@@ -68,7 +88,11 @@ function PortalContent() {
     if (!msg.isRead) markRead(msg.id);
   }
 
-  const types = ["ALL", ...Object.keys(TYPE_CONFIG)];
+  // Build filter tabs from actual types present in messages + always show ALL
+  // Fix poin 1: use actual message types from DB, not just TYPE_CONFIG keys
+  const presentTypes = Array.from(new Set(messages.map((m) => m.type)));
+  const tabs = ["ALL", ...presentTypes.filter((t) => TYPE_CONFIG[t])];
+
   const filtered =
     filter === "ALL" ? messages : messages.filter((m) => m.type === filter);
 
@@ -81,8 +105,7 @@ function PortalContent() {
         </div>
         <h1 className="ws-title">Portal</h1>
         <p className="ws-subtitle">
-          Your management hub — transfer alerts, league news, and AI-generated
-          football coverage.
+          Transfer alerts, league news, and management updates.
           {unread > 0 && (
             <span
               style={{
@@ -97,40 +120,51 @@ function PortalContent() {
         </p>
       </div>
 
+      {/* Filter tabs */}
       <div
         style={{
           display: "flex",
-          gap: 12,
+          gap: 8,
           marginBottom: 16,
           justifyContent: "space-between",
           flexWrap: "wrap",
         }}
       >
-        <div style={{ display: "flex", gap: 8 }}>
-          {types.map((t) => (
-            <button
-              key={t}
-              onClick={() => setFilter(t)}
-              style={{
-                padding: "5px 14px",
-                borderRadius: 20,
-                border: "1px solid",
-                borderColor: filter === t ? "var(--ws-gold)" : "var(--border)",
-                background:
-                  filter === t ? "rgba(255,215,0,0.1)" : "transparent",
-                color: filter === t ? "var(--ws-gold)" : "var(--ink-dim)",
-                cursor: "pointer",
-                fontSize: 11,
-                fontFamily: "var(--display)",
-                textTransform: "uppercase",
-                letterSpacing: 1,
-              }}
-            >
-              {t === "ALL"
-                ? "All"
-                : TYPE_CONFIG[t]?.icon + " " + TYPE_CONFIG[t]?.label}
-            </button>
-          ))}
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {tabs.map((t) => {
+            const cfg = TYPE_CONFIG[t];
+            const count =
+              t === "ALL"
+                ? messages.length
+                : messages.filter((m) => m.type === t).length;
+            return (
+              <button
+                key={t}
+                onClick={() => setFilter(t)}
+                style={{
+                  padding: "5px 12px",
+                  borderRadius: 20,
+                  border: "1px solid",
+                  borderColor:
+                    filter === t ? "var(--ws-gold)" : "var(--border)",
+                  background:
+                    filter === t ? "rgba(255,215,0,0.1)" : "transparent",
+                  color: filter === t ? "var(--ws-gold)" : "var(--ink-dim)",
+                  cursor: "pointer",
+                  fontSize: 11,
+                  fontFamily: "var(--display)",
+                  textTransform: "uppercase",
+                  letterSpacing: 1,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 4,
+                }}
+              >
+                {t === "ALL" ? "All" : `${cfg.icon} ${cfg.label}`}
+                <span style={{ fontSize: 9, opacity: 0.6 }}>({count})</span>
+              </button>
+            );
+          })}
         </div>
         {unread > 0 && (
           <button
@@ -151,14 +185,14 @@ function PortalContent() {
       </div>
 
       <div
-        className="ws-portal-grid"
         style={{
           display: "grid",
-          gridTemplateColumns: selected ? "1fr 400px" : "1fr",
+          gridTemplateColumns: selected ? "1fr 380px" : "1fr",
           gap: 14,
+          alignItems: "flex-start",
         }}
       >
-        {/* Message List */}
+        {/* Message list */}
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           {loading ? (
             <Centered>Loading messages...</Centered>
@@ -171,7 +205,7 @@ function PortalContent() {
                 color: "var(--ink-dim)",
               }}
             >
-              No messages yet.
+              No messages in this category.
             </div>
           ) : (
             filtered.map((msg) => {
@@ -227,7 +261,7 @@ function PortalContent() {
                           flexShrink: 0,
                         }}
                       >
-                        {new Date(msg.createdAt).toLocaleDateString()}
+                        {fmtDate(msg.createdAt)}
                       </span>
                     </div>
                     <div
@@ -277,92 +311,88 @@ function PortalContent() {
           )}
         </div>
 
-        {/* Message Detail */}
-        {selected && (
-          <>
-            {/* Mobile overlay backdrop */}
-            <div
-              onClick={() => setSelected(null)}
-              style={{
-                display: "none",
-                position: "fixed",
-                inset: 0,
-                zIndex: 40,
-                background: "rgba(0,0,0,0.6)",
-              }}
-              className="ws-portal-backdrop"
-            />
-            <div
-              className="panel ws-portal-detail"
-              style={{
-                padding: 20,
-                position: "sticky",
-                top: 80,
-                alignSelf: "flex-start",
-                maxHeight: "calc(100vh - 100px)",
-                overflowY: "auto",
-              }}
-            >
-              <button
-                onClick={() => setSelected(null)}
-                style={{
-                  background: "none",
-                  border: "none",
-                  color: "var(--ink-dim)",
-                  cursor: "pointer",
-                  fontSize: 12,
-                  marginBottom: 14,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 4,
-                }}
-              >
-                ← Close
-              </button>
+        {/* Detail panel — poin 3: constrained, no overflow */}
+        {selected &&
+          (() => {
+            const cfg = TYPE_CONFIG[selected.type] ?? TYPE_CONFIG.SYSTEM;
+            return (
               <div
+                className="panel"
                 style={{
-                  fontSize: 10,
-                  color: "var(--ink-dim)",
-                  textTransform: "uppercase",
-                  letterSpacing: 1,
-                  marginBottom: 6,
-                }}
-              >
-                {TYPE_CONFIG[selected.type]?.icon}{" "}
-                {TYPE_CONFIG[selected.type]?.label}
-              </div>
-              <div
-                style={{
-                  fontSize: 10,
-                  color: "var(--ink-dim)",
-                  marginBottom: 12,
-                }}
-              >
-                {new Date(selected.createdAt).toLocaleString()}
-              </div>
-              <h2
-                style={{
-                  fontSize: "1.05rem",
-                  fontFamily: "var(--display)",
-                  marginBottom: 14,
-                  lineHeight: 1.3,
-                }}
-              >
-                {selected.title}
-              </h2>
-              <p
-                style={{
-                  fontSize: 13,
-                  lineHeight: 1.8,
-                  color: "var(--ink-dim)",
+                  padding: 20,
+                  position: "sticky",
+                  top: 80,
+                  maxHeight: "calc(100vh - 120px)",
+                  overflowY: "auto",
                   wordBreak: "break-word",
+                  boxSizing: "border-box",
                 }}
               >
-                {selected.content}
-              </p>
-            </div>
-          </>
-        )}
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    marginBottom: 16,
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: 10,
+                      color: cfg.color,
+                      textTransform: "uppercase",
+                      letterSpacing: 1,
+                    }}
+                  >
+                    {cfg.icon} {cfg.label}
+                  </span>
+                  <button
+                    onClick={() => setSelected(null)}
+                    style={{
+                      background: "none",
+                      border: "1px solid var(--border)",
+                      color: "var(--ink-dim)",
+                      cursor: "pointer",
+                      fontSize: 11,
+                      padding: "3px 10px",
+                      borderRadius: 6,
+                    }}
+                  >
+                    ✕ Close
+                  </button>
+                </div>
+                <div
+                  style={{
+                    fontSize: 10,
+                    color: "var(--ink-dim)",
+                    marginBottom: 12,
+                  }}
+                >
+                  {fmtDateTime(selected.createdAt)}
+                </div>
+                <h2
+                  style={{
+                    fontSize: "1rem",
+                    fontFamily: "var(--display)",
+                    marginBottom: 14,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  {selected.title}
+                </h2>
+                <p
+                  style={{
+                    fontSize: 13,
+                    lineHeight: 1.9,
+                    color: "var(--ink-dim)",
+                    whiteSpace: "pre-wrap",
+                  }}
+                >
+                  {selected.content}
+                </p>
+              </div>
+            );
+          })()}
       </div>
     </div>
   );

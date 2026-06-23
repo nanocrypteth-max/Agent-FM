@@ -210,6 +210,30 @@ function FriendlyRoom() {
   const isGuest = lobby?.guestTeamId === session?.teamId;
   const isParticipant = isHost || isGuest;
 
+  // Squad/formation setup state (poin 6)
+  const [myPlayers, setMyPlayers] = useState<
+    {
+      id: string;
+      name: string;
+      position: string;
+      starRating: number;
+      pace: number;
+      shooting: number;
+      passing: number;
+      defending: number;
+      stamina: number;
+    }[]
+  >([]);
+  const [confirmed, setConfirmed] = useState(false); // must confirm lineup before ready
+
+  useEffect(() => {
+    if (!walletAddress || !isParticipant || myPlayers.length > 0) return;
+    fetch(`/api/squad?wallet=${walletAddress}`)
+      .then((r) => r.json())
+      .then((d) => setMyPlayers(d.players ?? []))
+      .catch(() => {});
+  }, [walletAddress, isParticipant, myPlayers.length]);
+
   async function markReady() {
     setIsReady(true);
     const res = await fetch(`/api/friendly/${code}/ready`, {
@@ -422,7 +446,7 @@ function FriendlyRoom() {
             </div>
           )}
 
-          {/* Formation picker + ready button */}
+          {/* Formation + squad confirm before ready — poin 6 */}
           {isParticipant && lobby.guestTeam && !isReady && (
             <div
               style={{
@@ -433,54 +457,236 @@ function FriendlyRoom() {
               }}
             >
               <p style={{ color: "var(--ink-dim)", fontSize: 13 }}>
-                Both managers present — choose your formation and mark ready!
+                Both managers present — set your formation and confirm lineup,
+                then mark ready!
               </p>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <label
+
+              {!confirmed ? (
+                // Step 1: pick formation + see squad summary
+                <div style={{ width: "100%", maxWidth: 480 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      marginBottom: 12,
+                      justifyContent: "center",
+                    }}
+                  >
+                    <label
+                      style={{
+                        fontSize: 12,
+                        color: "var(--ink-dim)",
+                        textTransform: "uppercase",
+                        letterSpacing: 1,
+                      }}
+                    >
+                      Formation:
+                    </label>
+                    <select
+                      value={selectedFormation}
+                      onChange={(e) => setSelectedFormation(e.target.value)}
+                      style={{
+                        padding: "8px 12px",
+                        borderRadius: 6,
+                        background: "var(--panel-bg)",
+                        border: "1px solid var(--border)",
+                        color: "var(--ink)",
+                        fontSize: 14,
+                        fontFamily: "var(--mono)",
+                      }}
+                    >
+                      {[
+                        "4-4-2",
+                        "4-3-3",
+                        "4-2-3-1",
+                        "3-5-2",
+                        "5-3-2",
+                        "4-5-1",
+                        "4-4-1-1",
+                        "4-3-1-2",
+                      ].map((f) => (
+                        <option key={f}>{f}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Squad summary — top 11 by stat total */}
+                  <div
+                    style={{
+                      background: "var(--panel-bg)",
+                      borderRadius: 8,
+                      border: "1px solid var(--border)",
+                      overflow: "hidden",
+                      marginBottom: 12,
+                    }}
+                  >
+                    <div
+                      style={{
+                        padding: "8px 12px",
+                        fontSize: 10,
+                        color: "var(--ink-dim)",
+                        textTransform: "uppercase",
+                        letterSpacing: 1,
+                        borderBottom: "1px solid var(--border)",
+                      }}
+                    >
+                      Starting 11 (auto-selected by rating)
+                    </div>
+                    <div style={{ maxHeight: 220, overflowY: "auto" }}>
+                      {myPlayers.slice(0, 11).map((p, i) => (
+                        <div
+                          key={p.id}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 10,
+                            padding: "7px 12px",
+                            borderBottom:
+                              i < 10 ? "1px solid var(--border)" : "none",
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontSize: 10,
+                              color: "var(--ink-dim)",
+                              width: 16,
+                            }}
+                          >
+                            {i + 1}
+                          </span>
+                          <div
+                            style={{ flex: 1, fontSize: 12, fontWeight: 500 }}
+                          >
+                            {p.name}
+                          </div>
+                          <span
+                            style={{
+                              fontSize: 9,
+                              padding: "1px 6px",
+                              borderRadius: 3,
+                              background: "rgba(255,255,255,0.06)",
+                              color: "var(--ink-dim)",
+                            }}
+                          >
+                            {p.position}
+                          </span>
+                          <span
+                            style={{
+                              fontSize: 10,
+                              color: "var(--ws-gold)",
+                              fontFamily: "var(--mono)",
+                            }}
+                          >
+                            {p.pace}/{p.shooting}/{p.passing}
+                          </span>
+                        </div>
+                      ))}
+                      {myPlayers.length === 0 && (
+                        <p
+                          style={{
+                            padding: "12px",
+                            fontSize: 12,
+                            color: "var(--ink-dim)",
+                            textAlign: "center",
+                          }}
+                        >
+                          Loading squad...
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => setConfirmed(true)}
+                    disabled={myPlayers.length < 12}
+                    style={{
+                      width: "100%",
+                      padding: "11px",
+                      borderRadius: 8,
+                      border: "none",
+                      background:
+                        myPlayers.length >= 12
+                          ? "rgba(255,215,0,0.15)"
+                          : "var(--border)",
+                      color:
+                        myPlayers.length >= 12
+                          ? "var(--ws-gold)"
+                          : "var(--ink-dim)",
+                      fontFamily: "var(--display)",
+                      fontWeight: 700,
+                      fontSize: 13,
+                      textTransform: "uppercase",
+                      letterSpacing: 1,
+                      cursor:
+                        myPlayers.length >= 12 ? "pointer" : "not-allowed",
+                      border: `1px solid ${myPlayers.length >= 12 ? "rgba(255,215,0,0.4)" : "var(--border)"}`,
+                    }}
+                  >
+                    {myPlayers.length < 12
+                      ? `⚠ Need at least 12 players (have ${myPlayers.length})`
+                      : `✓ Confirm Lineup (${selectedFormation})`}
+                  </button>
+                </div>
+              ) : (
+                // Step 2: lineup confirmed, show ready button
+                <div
                   style={{
-                    fontSize: 12,
-                    color: "var(--ink-dim)",
-                    textTransform: "uppercase",
-                    letterSpacing: 1,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: 10,
                   }}
                 >
-                  Formation:
-                </label>
-                <select
-                  value={selectedFormation}
-                  onChange={(e) => setSelectedFormation(e.target.value)}
-                  style={{
-                    padding: "8px 12px",
-                    borderRadius: 6,
-                    background: "var(--panel-bg)",
-                    border: "1px solid var(--border)",
-                    color: "var(--ink)",
-                    fontSize: 14,
-                    fontFamily: "var(--mono)",
-                  }}
-                >
-                  {FORMATIONS.map((f) => (
-                    <option key={f}>{f}</option>
-                  ))}
-                </select>
-              </div>
-              <button
-                onClick={markReady}
-                style={{
-                  padding: "12px 32px",
-                  borderRadius: 8,
-                  border: "none",
-                  background: "var(--ws-gold)",
-                  color: "#0a0d12",
-                  fontFamily: "var(--display)",
-                  fontWeight: 700,
-                  fontSize: 14,
-                  textTransform: "uppercase",
-                  cursor: "pointer",
-                }}
-              >
-                ✓ Ready ({selectedFormation})
-              </button>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color: "var(--ws-green-bright)",
+                      padding: "6px 16px",
+                      borderRadius: 20,
+                      background: "rgba(46,204,113,0.1)",
+                      border: "1px solid rgba(46,204,113,0.3)",
+                    }}
+                  >
+                    ✓ Lineup confirmed — {selectedFormation}
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button
+                      onClick={() => setConfirmed(false)}
+                      style={{
+                        padding: "10px 18px",
+                        borderRadius: 8,
+                        border: "1px solid var(--border)",
+                        background: "transparent",
+                        color: "var(--ink-dim)",
+                        cursor: "pointer",
+                        fontSize: 12,
+                        fontFamily: "var(--display)",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      ← Edit
+                    </button>
+                    <button
+                      onClick={markReady}
+                      style={{
+                        padding: "12px 32px",
+                        borderRadius: 8,
+                        border: "none",
+                        background: "var(--ws-gold)",
+                        color: "#0a0d12",
+                        fontFamily: "var(--display)",
+                        fontWeight: 700,
+                        fontSize: 14,
+                        textTransform: "uppercase",
+                        cursor: "pointer",
+                      }}
+                    >
+                      ✓ Ready!
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

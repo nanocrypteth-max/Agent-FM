@@ -49,6 +49,21 @@ export async function POST(
     );
   }
 
+  const MIN_PLAYERS = 12;
+  if (
+    fixture.homeTeam.players.length < MIN_PLAYERS ||
+    fixture.awayTeam.players.length < MIN_PLAYERS
+  ) {
+    const shortTeam =
+      fixture.homeTeam.players.length < MIN_PLAYERS
+        ? fixture.homeTeam.name
+        : fixture.awayTeam.name;
+    return NextResponse.json(
+      { error: `${shortTeam} needs at least ${MIN_PLAYERS} players to play.` },
+      { status: 400 },
+    );
+  }
+
   // If user controls a team in this fixture, their tactics must be submitted first
   const userTeam = fixture.homeTeam.isUserControlled
     ? fixture.homeTeam

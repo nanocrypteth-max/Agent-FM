@@ -8,6 +8,7 @@ import { useHoverSound } from "@/lib/sound/useHoverSound";
 export default function WalletButton() {
   const { connected, session, walletAddress, login, logout, loading } =
     useAuth();
+  // const { linkWallet } = usePrivy(); // for linking external wallet to email account
   const [open, setOpen] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -686,7 +687,7 @@ function ProfileEditModal({ onClose }: { onClose: () => void }) {
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
                 maxLength={30}
-                placeholder="Your manager name..."
+                placeholder={session?.displayName ?? "Your manager name..."}
                 style={{
                   width: "100%",
                   padding: "11px 14px",
@@ -717,7 +718,7 @@ function ProfileEditModal({ onClose }: { onClose: () => void }) {
                 value={teamName}
                 onChange={(e) => setTeamName(e.target.value)}
                 maxLength={40}
-                placeholder="Your club name..."
+                placeholder={session?.team.name ?? "Your club name..."}
                 style={{
                   width: "100%",
                   padding: "11px 14px",

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { fmtDate } from "@/lib/fmt";
 import AuthWall from "@/components/auth/AuthWall";
 import { useAuth } from "@/lib/auth/useAuth";
 import {
@@ -554,10 +555,7 @@ function MyListingsTab({
                           border: "1px solid rgba(46,204,113,0.4)",
                         }}
                       >
-                        ✓ SOLD ·{" "}
-                        {l.soldAt
-                          ? new Date(l.soldAt).toLocaleDateString()
-                          : ""}
+                        ✓ SOLD · {l.soldAt ? fmtDate(l.soldAt) : ""}
                       </span>
                     )}
                   </div>
@@ -582,7 +580,7 @@ function MyListingsTab({
                   >
                     {l.status === "SOLD"
                       ? "Received to wallet"
-                      : new Date(l.listedAt).toLocaleDateString()}
+                      : fmtDate(l.listedAt)}
                   </div>
                 </div>
                 {l.status === "LISTED" && (
