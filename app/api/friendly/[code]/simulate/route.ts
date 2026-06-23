@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { pusher, CHANNELS, EVENTS } from "@/lib/pusher/server";
 import { simulateMatch } from "@/lib/match-engine/simulate";
-import { generateTactics, toMatchEngineTactics } from "@/lib/ai-agent/generate-tactics";
+import {
+  buildFallbackTactics,
+  toMatchEngineTactics,
+} from "@/lib/ai-agent/generate-tactics";
 import { redis, KEYS } from "@/lib/redis/client";
 import type { MatchSimInput } from "@/lib/match-engine/types";
 
@@ -14,11 +17,16 @@ export const runtime = "nodejs";
  * Called by host when both players are ready.
  * Simulates match, streams events via Pusher, awards EXP.
  */
-export async function POST(req: NextRequest, { params }: { params: { code: string } }) {
+export async function POST(
+  req: NextRequest,
+  { params }: { params: { code: string } },
+) {
   const { solanaWallet } = await req.json();
   const code = params.code.toUpperCase();
 
-  const session = await prisma.userSession.findUnique({ where: { solanaWallet } });
+  const session = await prisma.userSession.findUnique({
+    where: { solanaWallet },
+  });
   const lobby = await prisma.friendlyMatch.findUnique({
     where: { code },
     include: {
@@ -28,11 +36,17 @@ export async function POST(req: NextRequest, { params }: { params: { code: strin
   });
 
   if (!lobby || !session || lobby.hostTeamId !== session.teamId) {
-    return NextResponse.json({ error: "Not authorized or lobby not found" }, { status: 403 });
+    return NextResponse.json(
+      { error: "Not authorized or lobby not found" },
+      { status: 403 },
+    );
   }
 
   if (!lobby.hostReady || !lobby.guestReady) {
-    return NextResponse.json({ error: "Both players must be ready" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Both players must be ready" },
+      { status: 400 },
+    );
   }
 
   if (!lobby.guestTeam) {
@@ -42,21 +56,29 @@ export async function POST(req: NextRequest, { params }: { params: { code: strin
   // Distributed lock: prevent double-simulate
   const lockKey = KEYS.matchLock(lobby.id);
   const acquired = await redis.set(lockKey, "1", { nx: true, ex: 120 });
-  if (!acquired) return NextResponse.json({ error: "Match already being simulated" }, { status: 409 });
+  if (!acquired)
+    return NextResponse.json(
+      { error: "Match already being simulated" },
+      { status: 409 },
+    );
 
   try {
-    // Generate tactics for both teams
     const makeSquad = (team: typeof lobby.hostTeam) =>
       team.players.map((p) => ({
-        id: p.id, name: p.name, position: p.position,
-        pace: p.pace, shooting: p.shooting, passing: p.passing,
-        defending: p.defending, stamina: p.stamina,
+        id: p.id,
+        name: p.name,
+        position: p.position as "GK" | "DF" | "MF" | "FW",
+        pace: p.pace,
+        shooting: p.shooting,
+        passing: p.passing,
+        defending: p.defending,
+        stamina: p.stamina,
       }));
 
-    const [hostTactics, guestTactics] = await Promise.all([
-      generateTactics({ teamName: lobby.hostTeam.name, squad: makeSquad(lobby.hostTeam), context: "MATCH_SPECIFIC" }),
-      generateTactics({ teamName: lobby.guestTeam.name, squad: makeSquad(lobby.guestTeam), context: "MATCH_SPECIFIC" }),
-    ]);
+    // Use deterministic fallback tactics — skips Gemini to avoid 429 quota errors
+    // and Vercel function timeout. Match quality is identical; only AI reasoning text differs.
+    const hostTactics = buildFallbackTactics(makeSquad(lobby.hostTeam));
+    const guestTactics = buildFallbackTactics(makeSquad(lobby.guestTeam));
 
     const simInput: MatchSimInput = {
       homeTeam: {

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { simulateMatch } from "@/lib/match-engine/simulate";
 import {
-  generateTactics,
+  buildFallbackTactics,
   toMatchEngineTactics,
   TacticsResult,
 } from "@/lib/ai-agent/generate-tactics";
@@ -330,28 +330,14 @@ async function getOrGenerateTactics(
   const overallDiff = Math.abs(teamOverallAvg - oppOverallAvg);
 
   if (overallDiff > OVERALL_DIFF_THRESHOLD) {
-    return generateTactics({
-      teamName: team.name,
-      squad,
-      opponentName: opponent.name,
-      opponentOverall: {
-        atk: opponent.overallAtk,
-        mid: opponent.overallMid,
-        def: opponent.overallDef,
-      },
-      context: "MATCH_SPECIFIC",
-    });
+    return buildFallbackTactics(squad);
   }
 
   if (team.baseTactics) {
     return team.baseTactics as TacticsResult;
   }
 
-  const tactics = await generateTactics({
-    teamName: team.name,
-    squad,
-    context: "SEASON_BASE",
-  });
+  const tactics = buildFallbackTactics(squad);
 
   await prisma.team.update({
     where: { id: team.id },

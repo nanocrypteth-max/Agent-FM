@@ -1,10 +1,29 @@
-import { GoogleGenerativeAI, SchemaType, FunctionDeclaration, FunctionCallingMode } from "@google/generative-ai";
+import {
+  GoogleGenerativeAI,
+  SchemaType,
+  FunctionDeclaration,
+  FunctionCallingMode,
+} from "@google/generative-ai";
 import { z } from "zod";
-import type { TacticsInput, Formation, Mentality, Pressing, Tempo, Width } from "../match-engine/types";
+import type {
+  TacticsInput,
+  Formation,
+  Mentality,
+  Pressing,
+  Tempo,
+  Width,
+} from "../match-engine/types";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY ?? "");
 
-const FORMATIONS = ["4-4-2", "4-3-3", "4-2-3-1", "3-5-2", "5-3-2", "4-5-1"] as const;
+const FORMATIONS = [
+  "4-4-2",
+  "4-3-3",
+  "4-2-3-1",
+  "3-5-2",
+  "5-3-2",
+  "4-5-1",
+] as const;
 const MENTALITIES = ["DEFENSIVE", "BALANCED", "ATTACKING"] as const;
 const PRESSINGS = ["LOW", "MEDIUM", "HIGH"] as const;
 const TEMPOS = ["SLOW", "NORMAL", "FAST"] as const;
@@ -60,17 +79,31 @@ const SET_TACTICS_FUNCTION: FunctionDeclaration = {
       startingXI: {
         type: SchemaType.ARRAY,
         items: { type: SchemaType.STRING },
-        description: "Exactly 11 player IDs from the provided squad, matching the formation's positional requirements",
+        description:
+          "Exactly 11 player IDs from the provided squad, matching the formation's positional requirements",
       },
-      pressing: { type: SchemaType.STRING, enum: [...PRESSINGS], format: "enum" },
+      pressing: {
+        type: SchemaType.STRING,
+        enum: [...PRESSINGS],
+        format: "enum",
+      },
       tempo: { type: SchemaType.STRING, enum: [...TEMPOS], format: "enum" },
       width: { type: SchemaType.STRING, enum: [...WIDTHS], format: "enum" },
       reasoning: {
         type: SchemaType.STRING,
-        description: "1-3 sentence explanation of the tactical choice, written as the manager's own words.",
+        description:
+          "1-3 sentence explanation of the tactical choice, written as the manager's own words.",
       },
     },
-    required: ["formation", "mentality", "startingXI", "pressing", "tempo", "width", "reasoning"],
+    required: [
+      "formation",
+      "mentality",
+      "startingXI",
+      "pressing",
+      "tempo",
+      "width",
+      "reasoning",
+    ],
   },
 };
 
@@ -79,8 +112,13 @@ const SET_TACTICS_FUNCTION: FunctionDeclaration = {
  * Falls back to a safe default formation if the LLM output fails validation
  * (LLM can hallucinate invalid player IDs or malformed formations).
  */
-export async function generateTactics(params: GenerateTacticsParams): Promise<TacticsResult> {
-  if (!process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY === "your-gemini-api-key-here") {
+export async function generateTactics(
+  params: GenerateTacticsParams,
+): Promise<TacticsResult> {
+  if (
+    !process.env.GEMINI_API_KEY ||
+    process.env.GEMINI_API_KEY === "your-gemini-api-key-here"
+  ) {
     console.warn("[ai-agent] GEMINI_API_KEY not set, using fallback tactics");
     return fallbackTactics(params.squad);
   }
@@ -127,12 +165,14 @@ export async function generateTactics(params: GenerateTacticsParams): Promise<Ta
     const squadIds = new Set(params.squad.map((p) => p.id));
     const invalidIds = parsed.startingXI.filter((id) => !squadIds.has(id));
     if (invalidIds.length > 0) {
-      throw new Error(`LLM returned invalid player IDs: ${invalidIds.join(", ")}`);
+      throw new Error(
+        `LLM returned invalid player IDs: ${invalidIds.join(", ")}`,
+      );
     }
 
     // Validate exactly 1 GK in startingXI (critical for match engine)
     const gkCount = params.squad.filter(
-      (p) => parsed.startingXI.includes(p.id) && p.position === "GK"
+      (p) => parsed.startingXI.includes(p.id) && p.position === "GK",
     ).length;
     if (gkCount !== 1) {
       throw new Error(`Invalid squad selection: expected 1 GK, got ${gkCount}`);
@@ -154,7 +194,7 @@ function buildPrompt(params: GenerateTacticsParams): string {
   const squadList = params.squad
     .map(
       (p) =>
-        `- ${p.id} | ${p.name} | ${p.position} | PAC ${p.pace} SHO ${p.shooting} PAS ${p.passing} DEF ${p.defending} STA ${p.stamina}`
+        `- ${p.id} | ${p.name} | ${p.position} | PAC ${p.pace} SHO ${p.shooting} PAS ${p.passing} DEF ${p.defending} STA ${p.stamina}`,
     )
     .join("\n");
 
@@ -166,8 +206,8 @@ function buildPrompt(params: GenerateTacticsParams): string {
     params.context === "SEASON_BASE"
       ? "This is your BASE tactical setup for the season — pick a balanced approach that suits your squad's strengths, since this will be reused across most matches."
       : params.context === "HALF_TIME_ADJUSTMENT"
-      ? "It is half-time. Adjust your tactics based on how the first half is likely going given your initial setup and the opponent."
-      : "Set your tactics for this specific match, considering the opponent's strengths.";
+        ? "It is half-time. Adjust your tactics based on how the first half is likely going given your initial setup and the opponent."
+        : "Set your tactics for this specific match, considering the opponent's strengths.";
 
   return `You are the manager of ${params.teamName}.${opponentInfo}
 
@@ -183,9 +223,17 @@ Select your formation, starting XI (exactly 11 players, must include exactly 1 G
  * Safe fallback: balanced 4-4-2 using best available player per position
  * (sorted by sum of attributes as a rough quality proxy).
  */
+export function buildFallbackTactics(
+  squad: GenerateTacticsParams["squad"],
+): TacticsResult {
+  return fallbackTactics(squad);
+}
+
 function fallbackTactics(squad: GenerateTacticsParams["squad"]): TacticsResult {
   const byPos = (pos: string) =>
-    squad.filter((p) => p.position === pos).sort((a, b) => sumAttrs(b) - sumAttrs(a));
+    squad
+      .filter((p) => p.position === pos)
+      .sort((a, b) => sumAttrs(b) - sumAttrs(a));
 
   const gk = byPos("GK").slice(0, 1);
   const df = byPos("DF").slice(0, 4);
@@ -208,7 +256,8 @@ function fallbackTactics(squad: GenerateTacticsParams["squad"]): TacticsResult {
     mentality: "BALANCED",
     startingXI: startingXI.slice(0, 11).map((p) => p.id),
     instructions: { pressing: "MEDIUM", tempo: "NORMAL", width: "NORMAL" },
-    reasoning: "Default balanced setup (AI tactics generation unavailable — using fallback).",
+    reasoning:
+      "Default balanced setup (AI tactics generation unavailable — using fallback).",
   };
 }
 
