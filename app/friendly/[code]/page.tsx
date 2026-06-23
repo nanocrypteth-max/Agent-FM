@@ -63,6 +63,16 @@ function FriendlyRoom() {
   const [simulating, setSimulating] = useState(false);
   const [selectedFormation, setSelectedFormation] = useState("4-4-2");
 
+  // PitchView player tracking
+  const [homeStartingXI, setHomeStartingXI] = useState<string[]>([]);
+  const [awayStartingXI, setAwayStartingXI] = useState<string[]>([]);
+
+  // EXP popup after match ends
+  const [expPopup, setExpPopup] = useState<{
+    result: "WIN" | "DRAW" | "LOSS";
+    expGained: number;
+  } | null>(null);
+
   // Match playback state
   const [events, setEvents] = useState<MatchEvent[]>([]);
   const [liveScore, setLiveScore] = useState({ home: 0, away: 0 });
@@ -117,21 +127,30 @@ function FriendlyRoom() {
         setLobby((prev) => (prev ? { ...prev, guestReady: true } : prev));
       });
 
-      channel.bind("match-start", (_data: { friendlyId: string }) => {
-        setSimulating(true);
-        // Host triggers simulate when they receive match-start (covers case where
-        // host was already ready and guest just became ready — Pusher notifies host).
-        // Redis nx lock on backend prevents double-simulate if host calls it twice.
-        const amHost =
-          sessionRef.current?.teamId === lobbyRef.current?.hostTeamId;
-        if (amHost && walletRef.current) {
-          fetch(`/api/friendly/${code}/simulate`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ solanaWallet: walletRef.current }),
-          }).catch(() => {});
-        }
-      });
+      channel.bind(
+        "match-start",
+        (data: {
+          friendlyId: string;
+          homeStartingXI?: string[];
+          awayStartingXI?: string[];
+        }) => {
+          setSimulating(true);
+          if (data.homeStartingXI?.length)
+            setHomeStartingXI(data.homeStartingXI);
+          if (data.awayStartingXI?.length)
+            setAwayStartingXI(data.awayStartingXI);
+          // Host triggers simulate — Redis nx lock prevents double-simulate
+          const amHost =
+            sessionRef.current?.teamId === lobbyRef.current?.hostTeamId;
+          if (amHost && walletRef.current) {
+            fetch(`/api/friendly/${code}/simulate`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ solanaWallet: walletRef.current }),
+            }).catch(() => {});
+          }
+        },
+      );
 
       channel.bind("match-event", (data: { events: MatchEvent[] }) => {
         setEvents((prev) => [...prev, ...data.events]);
@@ -152,6 +171,20 @@ function FriendlyRoom() {
         setLiveScore({ home: data.homeScore, away: data.awayScore });
         setMatchOver(true);
         setSimulating(false);
+
+        // Show EXP popup — determine if this client is home or away
+        const myTeamId = sessionRef.current?.teamId;
+        if (myTeamId && (data.homeTeamId || data.awayTeamId)) {
+          const isHome = myTeamId === data.homeTeamId;
+          const myScore = isHome ? data.homeScore : data.awayScore;
+          const oppScore = isHome ? data.awayScore : data.homeScore;
+          const result: "WIN" | "DRAW" | "LOSS" =
+            myScore > oppScore ? "WIN" : myScore < oppScore ? "LOSS" : "DRAW";
+          const expGained = isHome ? data.homeExpGained : data.awayExpGained;
+          if (expGained != null) {
+            setTimeout(() => setExpPopup({ result, expGained }), 1500);
+          }
+        }
       });
 
       channel.bind("lobby-expired", () => setError("Lobby has expired."));
@@ -494,8 +527,8 @@ function FriendlyRoom() {
           <div className="panel" style={{ padding: 12 }}>
             <PitchView
               events={events}
-              homeStartingXI={[]}
-              awayStartingXI={[]}
+              homeStartingXI={homeStartingXI}
+              awayStartingXI={awayStartingXI}
               homeFormationSlots={homeSlots}
               awayFormationSlots={awaySlots}
               speed={1}
@@ -610,6 +643,17 @@ function FriendlyRoom() {
           </button>
         </div>
       )}
+
+      {expPopup && (
+        <FriendlyExpPopup
+          result={expPopup.result}
+          expGained={expPopup.expGained}
+          onClose={() => {
+            setExpPopup(null);
+            router.push("/friendly");
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -669,6 +713,197 @@ function TeamChip({
         )}
       </div>
     </div>
+  );
+}
+
+const RESULT_CFG = {
+  WIN: {
+    emoji: "🏆",
+    label: "Victory!",
+    color: "#ffd700",
+    glow: "rgba(255,215,0,0.4)",
+  },
+  DRAW: {
+    emoji: "🤝",
+    label: "Draw",
+    color: "#4fc3f7",
+    glow: "rgba(79,195,247,0.3)",
+  },
+  LOSS: {
+    emoji: "💔",
+    label: "Defeat",
+    color: "#ff5252",
+    glow: "rgba(255,82,82,0.3)",
+  },
+};
+
+function FriendlyExpPopup({
+  result,
+  expGained,
+  onClose,
+}: {
+  result: "WIN" | "DRAW" | "LOSS";
+  expGained: number;
+  onClose: () => void;
+}) {
+  const cfg = RESULT_CFG[result];
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setVisible(true), 50);
+    return () => clearTimeout(t);
+  }, []);
+
+  function close() {
+    setVisible(false);
+    setTimeout(onClose, 250);
+  }
+
+  return (
+    <>
+      <div
+        onClick={close}
+        style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 300,
+          background: "rgba(0,0,0,0.7)",
+          backdropFilter: "blur(4px)",
+          opacity: visible ? 1 : 0,
+          transition: "opacity 0.25s",
+        }}
+      />
+      <div
+        style={{
+          position: "fixed",
+          top: "50%",
+          left: "50%",
+          transform: visible
+            ? "translate(-50%,-50%) scale(1)"
+            : "translate(-50%,-50%) scale(0.88)",
+          zIndex: 301,
+          width: "min(380px, 90vw)",
+          background: "linear-gradient(160deg, #0d1117, #0a0d12)",
+          border: `1px solid ${cfg.color}44`,
+          borderRadius: 14,
+          overflow: "hidden",
+          boxShadow: `0 0 40px ${cfg.glow}, 0 20px 50px rgba(0,0,0,0.6)`,
+          opacity: visible ? 1 : 0,
+          transition: "all 0.3s cubic-bezier(0.34,1.56,0.64,1)",
+        }}
+      >
+        <div
+          style={{
+            height: 3,
+            background: `linear-gradient(90deg, transparent, ${cfg.color}, transparent)`,
+          }}
+        />
+        <div style={{ padding: "28px 24px", textAlign: "center" }}>
+          <div
+            style={{
+              fontSize: 56,
+              marginBottom: 8,
+              filter: `drop-shadow(0 0 16px ${cfg.glow})`,
+              animation:
+                "exp-bounce 0.5s cubic-bezier(0.34,1.56,0.64,1) 0.1s both",
+            }}
+          >
+            {cfg.emoji}
+          </div>
+          <div
+            style={{
+              fontFamily: "var(--display)",
+              fontSize: "1.8rem",
+              textTransform: "uppercase",
+              letterSpacing: 2,
+              color: cfg.color,
+              marginBottom: 6,
+            }}
+          >
+            {cfg.label}
+          </div>
+          <div
+            style={{
+              fontSize: 11,
+              color: "var(--ink-dim)",
+              marginBottom: 20,
+              letterSpacing: 1,
+            }}
+          >
+            FRIENDLY MATCH
+          </div>
+          <div
+            style={{
+              background: "rgba(255,255,255,0.04)",
+              border: "1px solid rgba(255,255,255,0.08)",
+              borderRadius: 10,
+              padding: "14px 18px",
+              marginBottom: 16,
+            }}
+          >
+            <div
+              style={{
+                fontSize: 10,
+                color: "var(--ink-dim)",
+                textTransform: "uppercase",
+                letterSpacing: 2,
+                marginBottom: 8,
+              }}
+            >
+              Manager EXP Earned
+            </div>
+            <div
+              style={{
+                fontFamily: "var(--mono)",
+                fontSize: "2rem",
+                fontWeight: 700,
+                color: cfg.color,
+              }}
+            >
+              +{expGained}{" "}
+              <span
+                style={{
+                  fontSize: "0.9rem",
+                  color: "var(--ink-dim)",
+                  fontFamily: "var(--display)",
+                }}
+              >
+                EXP
+              </span>
+            </div>
+            <div
+              style={{ fontSize: 10, color: "var(--ink-dim)", marginTop: 6 }}
+            >
+              Friendly matches award reduced EXP
+            </div>
+          </div>
+          <button
+            onClick={close}
+            style={{
+              width: "100%",
+              padding: "11px",
+              borderRadius: 8,
+              border: "none",
+              background: `linear-gradient(135deg, ${cfg.color}bb, ${cfg.color})`,
+              color: "#0a0d12",
+              fontFamily: "var(--display)",
+              fontWeight: 700,
+              fontSize: 13,
+              textTransform: "uppercase",
+              letterSpacing: 2,
+              cursor: "pointer",
+            }}
+          >
+            Back to Lobbies
+          </button>
+        </div>
+        <style>{`
+          @keyframes exp-bounce {
+            from { transform: scale(0.3); opacity: 0; }
+            to   { transform: scale(1);   opacity: 1; }
+          }
+        `}</style>
+      </div>
+    </>
   );
 }
 

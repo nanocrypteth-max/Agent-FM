@@ -4,9 +4,16 @@ import { useAuth } from "@/lib/auth/useAuth";
 import LandingPage from "./LandingPage";
 
 export default function AuthWall({ children }: { children: React.ReactNode }) {
-  const { ready, connected } = useAuth();
+  const { ready, authenticated, connected, loading } = useAuth();
 
-  if (!ready) return <FootballLoader />;
+  // Show loader while:
+  // 1. Privy SDK is initializing (!ready)
+  // 2. User is authenticated but session is still being synced (authenticated && loading)
+  //    — this prevents the LandingPage flash between "Privy says logged in"
+  //      and "session fetched from /api/auth"
+  const isInitializing = !ready || (authenticated && loading);
+
+  if (isInitializing) return <FootballLoader />;
   if (!connected) return <LandingPage />;
   return <>{children}</>;
 }

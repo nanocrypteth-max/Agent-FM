@@ -101,8 +101,15 @@ export async function POST(
 
     const result = simulateMatch(simInput, lobby.id);
 
-    // Stream match events via Pusher (batch in groups of 5 to avoid rate limits)
+    // Broadcast starting XIs before streaming events so PitchView can initialize players
     const channel = CHANNELS.friendly(code);
+    await pusher.trigger(channel, EVENTS.MATCH_START, {
+      friendlyId: lobby.id,
+      homeStartingXI: hostTactics.startingXI,
+      awayStartingXI: guestTactics.startingXI,
+    });
+
+    // Stream match events via Pusher in batches of 5
     const BATCH = 5;
     for (let i = 0; i < result.events.length; i += BATCH) {
       const batch = result.events.slice(i, i + BATCH);
@@ -130,25 +137,45 @@ export async function POST(
       data: { status: "COMPLETED" },
     });
 
-    // Award EXP (non-blocking)
-    fetch(`${req.headers.get("origin") ?? ""}/api/exp`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        matchResultId: matchResult.id,
-        homeTeamId: lobby.hostTeamId,
-        awayTeamId: lobby.guestTeam.id,
-        homeScore: result.homeScore,
-        awayScore: result.awayScore,
-        events: result.events,
-      }),
+    // Award reduced EXP for friendly match (half of normal match EXP, no level-up portal)
+    awardFriendlyExp({
+      homeTeamId: lobby.hostTeamId,
+      awayTeamId: lobby.guestTeam.id,
+      homeScore: result.homeScore,
+      awayScore: result.awayScore,
     }).catch(() => {});
 
-    // Broadcast match end
+    // Broadcast match end with EXP info for popup
+    const friendlyExpWin = 25;
+    const friendlyExpDraw = 10;
+    const friendlyExpLoss = 5;
+    const homeResult =
+      result.homeScore > result.awayScore
+        ? "WIN"
+        : result.homeScore < result.awayScore
+          ? "LOSS"
+          : "DRAW";
+    const awayResult =
+      homeResult === "WIN" ? "LOSS" : homeResult === "LOSS" ? "WIN" : "DRAW";
+
     await pusher.trigger(channel, EVENTS.MATCH_END, {
       homeScore: result.homeScore,
       awayScore: result.awayScore,
       matchResultId: matchResult.id,
+      homeExpGained:
+        homeResult === "WIN"
+          ? friendlyExpWin
+          : homeResult === "DRAW"
+            ? friendlyExpDraw
+            : friendlyExpLoss,
+      awayExpGained:
+        awayResult === "WIN"
+          ? friendlyExpWin
+          : awayResult === "DRAW"
+            ? friendlyExpDraw
+            : friendlyExpLoss,
+      homeTeamId: lobby.hostTeamId,
+      awayTeamId: lobby.guestTeam.id,
     });
 
     return NextResponse.json({
@@ -159,4 +186,47 @@ export async function POST(
   } finally {
     await redis.del(lockKey);
   }
+}
+
+// Friendly match EXP — half of regular league match values, no level-up portal message
+async function awardFriendlyExp({
+  homeTeamId,
+  awayTeamId,
+  homeScore,
+  awayScore,
+}: {
+  homeTeamId: string;
+  awayTeamId: string;
+  homeScore: number;
+  awayScore: number;
+}) {
+  const EXP = { WIN: 25, DRAW: 10, LOSS: 5 };
+  const [homeSession, awaySession] = await Promise.all([
+    prisma.userSession.findUnique({ where: { teamId: homeTeamId } }),
+    prisma.userSession.findUnique({ where: { teamId: awayTeamId } }),
+  ]);
+
+  const homeResult =
+    homeScore > awayScore ? "WIN" : homeScore < awayScore ? "LOSS" : "DRAW";
+  const awayResult =
+    homeResult === "WIN" ? "LOSS" : homeResult === "LOSS" ? "WIN" : "DRAW";
+
+  const updates = [];
+  if (homeSession) {
+    updates.push(
+      prisma.userSession.update({
+        where: { id: homeSession.id },
+        data: { managerExp: { increment: EXP[homeResult] } },
+      }),
+    );
+  }
+  if (awaySession) {
+    updates.push(
+      prisma.userSession.update({
+        where: { id: awaySession.id },
+        data: { managerExp: { increment: EXP[awayResult] } },
+      }),
+    );
+  }
+  await Promise.all(updates);
 }

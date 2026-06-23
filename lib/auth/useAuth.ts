@@ -28,7 +28,10 @@ export function useAuth() {
   const { wallets, createWallet } = useSolanaWallets();
 
   const [session, setSession] = useState<UserSession | null>(null);
-  const [loading, setLoading] = useState(false);
+  // Start as true — stays true until first sync attempt completes.
+  // This prevents AuthWall from briefly showing LandingPage between
+  // "Privy authenticated" and "session fetched from /api/auth".
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const isSyncing = useRef(false);
   const hasSynced = useRef(false);
@@ -63,6 +66,7 @@ export function useAuth() {
     if (!ready || !authenticated || !user) {
       if (ready && !authenticated) {
         setSession(null);
+        setLoading(false); // not logged in — stop loading, show LandingPage
         hasSynced.current = false;
       }
       return;
@@ -109,11 +113,25 @@ export function useAuth() {
       setLoading(true);
       return () => clearInterval(interval);
     }
-  }, [ready, authenticated, user, solanaWallet, syncSession, wallets, createWallet]);
+  }, [
+    ready,
+    authenticated,
+    user,
+    solanaWallet,
+    syncSession,
+    wallets,
+    createWallet,
+  ]);
 
   // When wallet appears after polling, sync if not yet done
   useEffect(() => {
-    if (solanaWallet && authenticated && user && !hasSynced.current && !isSyncing.current) {
+    if (
+      solanaWallet &&
+      authenticated &&
+      user &&
+      !hasSynced.current &&
+      !isSyncing.current
+    ) {
       syncSession(solanaWallet, user.id);
     }
   }, [solanaWallet, authenticated, user, syncSession]);
@@ -125,24 +143,27 @@ export function useAuth() {
     setError(null);
   }, [privyLogout]);
 
-  const updateProfile = useCallback(async (updates: {
-    displayName?: string;
-    avatarBase64?: string;
-    teamName?: string;
-  }) => {
-    if (!solanaWallet) return false;
-    const res = await fetch("/api/auth", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ solanaWallet, ...updates }),
-    });
-    const data = await res.json();
-    if (res.ok) {
-      setSession(data.session);
-      return true;
-    }
-    return false;
-  }, [solanaWallet]);
+  const updateProfile = useCallback(
+    async (updates: {
+      displayName?: string;
+      avatarBase64?: string;
+      teamName?: string;
+    }) => {
+      if (!solanaWallet) return false;
+      const res = await fetch("/api/auth", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ solanaWallet, ...updates }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSession(data.session);
+        return true;
+      }
+      return false;
+    },
+    [solanaWallet],
+  );
 
   const refetch = useCallback(() => {
     if (solanaWallet && user?.id) {
