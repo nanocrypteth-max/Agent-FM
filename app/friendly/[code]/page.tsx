@@ -1,15 +1,12 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth/useAuth";
 import AuthWall from "@/components/auth/AuthWall";
 import PitchView from "@/components/pitch/PitchView";
 import { formationToSlots } from "@/lib/match-engine/formations";
 import type { MatchEvent } from "@/lib/match-engine/types";
-
-// Pusher client — lazy loaded to avoid SSR issues
-let PusherClient: any = null;
 
 interface LobbyData {
   id: string;
@@ -34,6 +31,17 @@ interface LobbyData {
   matchResult: any | null;
 }
 
+const FORMATIONS = [
+  "4-4-2",
+  "4-3-3",
+  "4-2-3-1",
+  "3-5-2",
+  "5-3-2",
+  "4-5-1",
+  "4-4-1-1",
+  "4-3-1-2",
+] as const;
+
 export default function FriendlyRoomPage() {
   return (
     <AuthWall>
@@ -53,14 +61,29 @@ function FriendlyRoom() {
   const [error, setError] = useState<string | null>(null);
   const [isReady, setIsReady] = useState(false);
   const [simulating, setSimulating] = useState(false);
+  const [selectedFormation, setSelectedFormation] = useState("4-4-2");
 
-  // Match state
+  // Match playback state
   const [events, setEvents] = useState<MatchEvent[]>([]);
   const [liveScore, setLiveScore] = useState({ home: 0, away: 0 });
   const [liveMinute, setLiveMinute] = useState(0);
   const [matchOver, setMatchOver] = useState(false);
   const [feed, setFeed] = useState<MatchEvent[]>([]);
   const [pusherInstance, setPusherInstance] = useState<any>(null);
+
+  // Refs to avoid stale closures in Pusher event handlers
+  const sessionRef = useRef(session);
+  const lobbyRef = useRef(lobby);
+  const walletRef = useRef(walletAddress);
+  useEffect(() => {
+    sessionRef.current = session;
+  }, [session]);
+  useEffect(() => {
+    lobbyRef.current = lobby;
+  }, [lobby]);
+  useEffect(() => {
+    walletRef.current = walletAddress;
+  }, [walletAddress]);
 
   const loadLobby = useCallback(async () => {
     const res = await fetch(`/api/friendly/${code}`);
@@ -70,15 +93,17 @@ function FriendlyRoom() {
     setLoading(false);
   }, [code]);
 
-  // Initialize Pusher
+  // Initialize Pusher and bind events
   useEffect(() => {
     const pk = process.env.NEXT_PUBLIC_PUSHER_KEY;
     const cluster = process.env.NEXT_PUBLIC_PUSHER_CLUSTER ?? "ap1";
     if (!pk) return;
 
+    let pusher: any;
+
     import("pusher-js").then(({ default: Pusher }) => {
-      const p = new Pusher(pk, { cluster });
-      const channel = p.subscribe(`friendly-${code}`);
+      pusher = new Pusher(pk, { cluster });
+      const channel = pusher.subscribe(`friendly-${code}`);
 
       channel.bind("guest-joined", (data: any) => {
         setLobby((prev) =>
@@ -91,9 +116,23 @@ function FriendlyRoom() {
       channel.bind("guest-ready", () => {
         setLobby((prev) => (prev ? { ...prev, guestReady: true } : prev));
       });
-      channel.bind("match-start", () => {
+
+      channel.bind("match-start", (_data: { friendlyId: string }) => {
         setSimulating(true);
+        // Host triggers simulate when they receive match-start (covers case where
+        // host was already ready and guest just became ready — Pusher notifies host).
+        // Redis nx lock on backend prevents double-simulate if host calls it twice.
+        const amHost =
+          sessionRef.current?.teamId === lobbyRef.current?.hostTeamId;
+        if (amHost && walletRef.current) {
+          fetch(`/api/friendly/${code}/simulate`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ solanaWallet: walletRef.current }),
+          }).catch(() => {});
+        }
       });
+
       channel.bind("match-event", (data: { events: MatchEvent[] }) => {
         setEvents((prev) => [...prev, ...data.events]);
         setFeed((prev) => [...data.events.slice().reverse(), ...prev]);
@@ -108,24 +147,27 @@ function FriendlyRoom() {
           if (ev.minute) setLiveMinute(ev.minute);
         });
       });
+
       channel.bind("match-end", (data: any) => {
         setLiveScore({ home: data.homeScore, away: data.awayScore });
         setMatchOver(true);
         setSimulating(false);
       });
+
       channel.bind("lobby-expired", () => setError("Lobby has expired."));
       channel.bind("lobby-cancelled", () =>
         setError("Host cancelled the lobby."),
       );
 
-      setPusherInstance(p);
+      setPusherInstance(pusher);
     });
 
     return () => {
-      pusherInstance?.unsubscribe(`friendly-${code}`);
-      pusherInstance?.disconnect();
+      pusher?.unsubscribe(`friendly-${code}`);
+      pusher?.disconnect();
     };
-  }, [code]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [code]); // intentionally omit pusherInstance — would cause re-subscribe loop
 
   useEffect(() => {
     loadLobby();
@@ -134,32 +176,40 @@ function FriendlyRoom() {
   const isHost = lobby?.hostTeamId === session?.teamId;
   const isGuest = lobby?.guestTeamId === session?.teamId;
   const isParticipant = isHost || isGuest;
-  const [selectedFormation, setSelectedFormation] = useState("4-4-2");
 
   async function markReady() {
     setIsReady(true);
-    await fetch(`/api/friendly/${code}/ready`, {
+    const res = await fetch(`/api/friendly/${code}/ready`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ solanaWallet: walletAddress }),
     });
+    const data = await res.json();
+
+    // Host also triggers simulate here — covers case where guest was already ready
+    // and host just became last to ready. Pusher match-start covers the reverse.
+    if (data.bothReady && lobby?.hostTeamId === session?.teamId) {
+      setSimulating(true);
+      fetch(`/api/friendly/${code}/simulate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ solanaWallet: walletAddress }),
+      }).catch(() => {});
+    }
   }
 
-  async function startMatch() {
-    setSimulating(true);
-    await fetch(`/api/friendly/${code}/simulate`, {
-      method: "POST",
+  async function cancelLobby() {
+    await fetch(`/api/friendly/${code}`, {
+      method: "DELETE",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ solanaWallet: walletAddress }),
     });
+    router.push("/friendly");
   }
 
-  const handleMinuteChange = useCallback(
-    (minute: number, eventsThisMinute: MatchEvent[]) => {
-      setLiveMinute(minute);
-    },
-    [],
-  );
+  const handleMinuteChange = useCallback((minute: number) => {
+    setLiveMinute(minute);
+  }, []);
 
   if (loading) return <Centered>Loading lobby...</Centered>;
   if (error)
@@ -179,7 +229,7 @@ function FriendlyRoom() {
   if (!lobby) return <Centered>Lobby not found</Centered>;
 
   const showPitch = simulating || matchOver;
-  const defaultSlots = formationToSlots("4-4-2", "HOME");
+  const homeSlots = formationToSlots("4-4-2", "HOME");
   const awaySlots = formationToSlots("4-4-2", "AWAY");
 
   return (
@@ -193,7 +243,7 @@ function FriendlyRoom() {
         <span className="ws-back-arrow">→</span>
       </button>
 
-      {/* Lobby header */}
+      {/* Scoreboard header */}
       <div className="panel" style={{ padding: "16px 24px", marginBottom: 12 }}>
         <div
           style={{
@@ -255,18 +305,21 @@ function FriendlyRoom() {
         </div>
       </div>
 
+      {/* Lobby state panel */}
       {!showPitch && (
         <div
           className="panel"
           style={{ padding: 20, marginBottom: 12, textAlign: "center" }}
         >
-          {lobby.status === "WAITING" && !isParticipant && (
+          {/* Spectator */}
+          {!isParticipant && (
             <p style={{ color: "var(--ink-dim)", fontSize: 13 }}>
               Spectating — waiting for players
             </p>
           )}
 
-          {lobby.status === "WAITING" && isHost && !lobby.guestTeam && (
+          {/* Host waiting for guest */}
+          {isHost && !lobby.guestTeam && (
             <div
               style={{
                 display: "flex",
@@ -278,11 +331,11 @@ function FriendlyRoom() {
               <div style={{ fontSize: 13, color: "var(--ink-dim)" }}>
                 Share this code with your opponent:
               </div>
-              {/* Copy code button */}
               <button
-                onClick={() => {
-                  navigator.clipboard.writeText(code).catch(() => {});
-                }}
+                onClick={() =>
+                  navigator.clipboard.writeText(code).catch(() => {})
+                }
+                title="Click to copy"
                 style={{
                   fontFamily: "var(--mono)",
                   fontSize: 32,
@@ -294,7 +347,6 @@ function FriendlyRoom() {
                   padding: "12px 24px",
                   cursor: "pointer",
                 }}
-                title="Click to copy"
               >
                 {code}
               </button>
@@ -317,25 +369,16 @@ function FriendlyRoom() {
                 </span>
                 Waiting for opponent to join...
               </div>
-              {/* Cancel lobby */}
               <button
-                onClick={async () => {
-                  await fetch(`/api/friendly/${code}`, {
-                    method: "DELETE",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ solanaWallet: walletAddress }),
-                  });
-                  router.push("/friendly");
-                }}
+                onClick={cancelLobby}
                 style={{
-                  marginTop: 4,
                   padding: "8px 20px",
                   borderRadius: 6,
+                  cursor: "pointer",
                   background: "transparent",
                   border: "1px solid rgba(255,82,82,0.4)",
                   color: "#ff5252",
                   fontSize: 12,
-                  cursor: "pointer",
                   fontFamily: "var(--display)",
                   textTransform: "uppercase",
                   letterSpacing: 1,
@@ -346,118 +389,114 @@ function FriendlyRoom() {
             </div>
           )}
 
-          {(lobby.status === "READY" || lobby.guestTeam) &&
-            isParticipant &&
-            !isReady && (
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  gap: 14,
-                }}
-              >
-                <p style={{ color: "var(--ink-dim)", fontSize: 13 }}>
-                  Both managers present — choose your formation then mark ready!
-                </p>
-                {/* Formation picker — poin 10 */}
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <label
-                    style={{
-                      fontSize: 12,
-                      color: "var(--ink-dim)",
-                      textTransform: "uppercase",
-                      letterSpacing: 1,
-                    }}
-                  >
-                    Formation:
-                  </label>
-                  <select
-                    value={selectedFormation}
-                    onChange={(e) => setSelectedFormation(e.target.value)}
-                    style={{
-                      padding: "8px 12px",
-                      borderRadius: 6,
-                      background: "var(--panel-bg)",
-                      border: "1px solid var(--border)",
-                      color: "var(--ink)",
-                      fontSize: 14,
-                      fontFamily: "var(--mono)",
-                    }}
-                  >
-                    {[
-                      "4-4-2",
-                      "4-3-3",
-                      "4-2-3-1",
-                      "3-5-2",
-                      "5-3-2",
-                      "4-5-1",
-                      "4-4-1-1",
-                      "4-3-1-2",
-                    ].map((f) => (
-                      <option key={f}>{f}</option>
-                    ))}
-                  </select>
-                </div>
-                <button
-                  onClick={markReady}
-                  style={{
-                    padding: "12px 32px",
-                    borderRadius: 8,
-                    border: "none",
-                    background: "var(--ws-gold)",
-                    color: "#0a0d12",
-                    fontFamily: "var(--display)",
-                    fontWeight: 700,
-                    fontSize: 14,
-                    textTransform: "uppercase",
-                    cursor: "pointer",
-                  }}
-                >
-                  ✓ Ready ({selectedFormation})
-                </button>
-              </div>
-            )}
-
-          {isReady && !matchOver && (
-            <p style={{ color: "var(--ws-green-bright)" }}>
-              ✓ You're ready — waiting for {isHost ? "opponent" : "host"}...
-            </p>
-          )}
-
-          {lobby.hostReady && lobby.guestReady && isHost && !simulating && (
-            <button
-              onClick={startMatch}
+          {/* Formation picker + ready button */}
+          {isParticipant && lobby.guestTeam && !isReady && (
+            <div
               style={{
-                padding: "14px 40px",
-                borderRadius: 8,
-                border: "none",
-                background: "var(--ws-gold)",
-                color: "#0a0d12",
-                fontFamily: "var(--display)",
-                fontWeight: 700,
-                fontSize: 16,
-                textTransform: "uppercase",
-                cursor: "pointer",
-                marginTop: 12,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 14,
               }}
             >
-              ⚽ Kick Off!
-            </button>
+              <p style={{ color: "var(--ink-dim)", fontSize: 13 }}>
+                Both managers present — choose your formation and mark ready!
+              </p>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <label
+                  style={{
+                    fontSize: 12,
+                    color: "var(--ink-dim)",
+                    textTransform: "uppercase",
+                    letterSpacing: 1,
+                  }}
+                >
+                  Formation:
+                </label>
+                <select
+                  value={selectedFormation}
+                  onChange={(e) => setSelectedFormation(e.target.value)}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 6,
+                    background: "var(--panel-bg)",
+                    border: "1px solid var(--border)",
+                    color: "var(--ink)",
+                    fontSize: 14,
+                    fontFamily: "var(--mono)",
+                  }}
+                >
+                  {FORMATIONS.map((f) => (
+                    <option key={f}>{f}</option>
+                  ))}
+                </select>
+              </div>
+              <button
+                onClick={markReady}
+                style={{
+                  padding: "12px 32px",
+                  borderRadius: 8,
+                  border: "none",
+                  background: "var(--ws-gold)",
+                  color: "#0a0d12",
+                  fontFamily: "var(--display)",
+                  fontWeight: 700,
+                  fontSize: 14,
+                  textTransform: "uppercase",
+                  cursor: "pointer",
+                }}
+              >
+                ✓ Ready ({selectedFormation})
+              </button>
+            </div>
+          )}
+
+          {/* Waiting for other player after marking ready */}
+          {(isReady && !lobby.hostReady) || (isReady && !lobby.guestReady) ? (
+            <p style={{ color: "var(--ws-green-bright)", marginTop: 8 }}>
+              ✓ You&apos;re ready — waiting for {isHost ? "opponent" : "host"}
+              ...
+            </p>
+          ) : null}
+
+          {/* Both ready — about to start */}
+          {lobby.hostReady && lobby.guestReady && !simulating && (
+            <div
+              style={{
+                marginTop: 8,
+                fontSize: 13,
+                color: "var(--ws-green-bright)",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                justifyContent: "center",
+              }}
+            >
+              <span
+                style={{
+                  animation: "ws-float 0.8s ease-in-out infinite",
+                  display: "inline-block",
+                }}
+              >
+                ⚽
+              </span>
+              Both ready — match starting...
+            </div>
           )}
         </div>
       )}
 
+      {/* Live pitch + commentary */}
       {showPitch && (
         <div
-          style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 12 }}
+          style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 12 }}
         >
           <div className="panel" style={{ padding: 12 }}>
             <PitchView
               events={events}
               homeStartingXI={[]}
               awayStartingXI={[]}
-              homeFormationSlots={defaultSlots}
+              homeFormationSlots={homeSlots}
               awayFormationSlots={awaySlots}
               speed={1}
               onMinuteChange={handleMinuteChange}
@@ -466,13 +505,13 @@ function FriendlyRoom() {
           </div>
           <div
             className="panel scroll-thin"
-            style={{ overflowY: "auto", maxHeight: 400 }}
+            style={{ overflowY: "auto", maxHeight: 420 }}
           >
             <div
               style={{
                 padding: "10px 12px",
                 borderBottom: "1px solid var(--border)",
-                fontSize: 12,
+                fontSize: 11,
                 fontFamily: "var(--display)",
                 textTransform: "uppercase",
                 letterSpacing: 1,
@@ -489,6 +528,13 @@ function FriendlyRoom() {
                 gap: 2,
               }}
             >
+              {feed.length === 0 && (
+                <p
+                  style={{ color: "var(--ink-dim)", fontSize: 12, padding: 8 }}
+                >
+                  Match starting...
+                </p>
+              )}
               {feed.map((ev, i) => (
                 <div
                   key={i}
@@ -507,10 +553,10 @@ function FriendlyRoom() {
                     style={{
                       fontFamily: "var(--mono)",
                       color: "var(--ink-dim)",
-                      minWidth: 24,
+                      minWidth: 28,
                     }}
                   >
-                    {ev.minute}'
+                    {ev.minute}&apos;
                   </span>
                   <span>
                     {ev.type === "GOAL"
@@ -518,8 +564,12 @@ function FriendlyRoom() {
                       : ev.type === "SAVE"
                         ? "🧤 Save"
                         : ev.type === "YELLOW_CARD"
-                          ? "🟨 Yellow"
-                          : ev.type}
+                          ? "🟨 Yellow card"
+                          : ev.type === "SHOT"
+                            ? "🎯 Shot"
+                            : ev.type === "HALF_TIME"
+                              ? "🔔 Half time"
+                              : ev.type}
                   </span>
                 </div>
               ))}
@@ -528,6 +578,7 @@ function FriendlyRoom() {
         </div>
       )}
 
+      {/* Full time result */}
       {matchOver && (
         <div
           className="panel"
@@ -536,7 +587,7 @@ function FriendlyRoom() {
           <div
             style={{
               fontFamily: "var(--display)",
-              fontSize: "1.3rem",
+              fontSize: "1.4rem",
               marginBottom: 8,
             }}
           >
@@ -599,7 +650,7 @@ function TeamChip({
         <div
           style={{
             fontFamily: "var(--display)",
-            fontSize: "0.95rem",
+            fontSize: "0.9rem",
             textTransform: "uppercase",
             color: waiting ? "var(--ink-dim)" : "var(--ink)",
           }}
