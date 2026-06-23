@@ -1,5 +1,6 @@
 import "./globals.css";
 import Navbar from "@/components/ui/Navbar";
+import { FootballSVG } from "@/components/ui/FootballIcon";
 import PrivyProvider from "@/components/auth/PrivyProvider";
 import { APP_NAME, APP_DESCRIPTION } from "@/lib/config";
 
@@ -28,11 +29,21 @@ export default function RootLayout({
           <div className="ws-orb ws-orb-1" />
           <div className="ws-orb ws-orb-2" />
           <div className="ws-orb ws-orb-3" />
-          <div className="ws-ball ws-ball-1" />
-          <div className="ws-ball ws-ball-2" />
-          <div className="ws-ball ws-ball-3" />
-          <div className="ws-ball ws-ball-4" />
-          <div className="ws-ball ws-ball-5" />
+          <div className="ws-ball ws-ball-1">
+            <FootballSVG size={60} />
+          </div>
+          <div className="ws-ball ws-ball-2">
+            <FootballSVG size={36} />
+          </div>
+          <div className="ws-ball ws-ball-3">
+            <FootballSVG size={80} />
+          </div>
+          <div className="ws-ball ws-ball-4">
+            <FootballSVG size={44} />
+          </div>
+          <div className="ws-ball ws-ball-5">
+            <FootballSVG size={28} />
+          </div>
         </div>
         <PrivyProvider>
           <Navbar />

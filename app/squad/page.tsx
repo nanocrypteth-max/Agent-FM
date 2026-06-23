@@ -2,28 +2,16 @@
 
 import AuthWall from "@/components/auth/AuthWall";
 import { useAuth } from "@/lib/auth/useAuth";
-import { useEffect, useState, useMemo } from "react";
-import { formationToSlots } from "@/lib/match-engine/formations";
+import { useEffect, useState } from "react";
+import { formationToSlots, FORMATIONS } from "@/lib/match-engine/formations";
+import type { FormationSlot } from "@/lib/match-engine/formations";
 
-const FORMATIONS = [
-  "4-4-2",
-  "4-3-3",
-  "4-2-3-1",
-  "3-5-2",
-  "5-3-2",
-  "4-5-1",
-] as const;
-
-const POSITION_REQ: Record<
-  string,
-  { GK: number; DF: number; MF: number; FW: number }
-> = {
-  "4-4-2": { GK: 1, DF: 4, MF: 4, FW: 2 },
-  "4-3-3": { GK: 1, DF: 4, MF: 3, FW: 3 },
-  "4-2-3-1": { GK: 1, DF: 4, MF: 5, FW: 1 },
-  "3-5-2": { GK: 1, DF: 3, MF: 5, FW: 2 },
-  "5-3-2": { GK: 1, DF: 5, MF: 3, FW: 2 },
-  "4-5-1": { GK: 1, DF: 4, MF: 5, FW: 1 },
+// Label color per position group
+const POS_GROUP_COLOR: Record<string, string> = {
+  GK: "#ffd700",
+  DF: "#4fc3f7",
+  MF: "#ce93d8",
+  FW: "#ff5252",
 };
 
 interface Player {
@@ -72,7 +60,6 @@ function SquadContent() {
 
   useEffect(() => {
     if (!walletAddress) return;
-
     fetch(`/api/squad?wallet=${walletAddress}`)
       .then((r) => r.json())
       .then((data) => {
@@ -89,23 +76,30 @@ function SquadContent() {
       .catch(() => {});
   }, [walletAddress]);
 
-  const pitchSlots = formationToSlots(formation as any, "HOME");
-  const req = POSITION_REQ[formation] ?? POSITION_REQ["4-4-2"];
-
+  const pitchSlots: FormationSlot[] = formationToSlots(
+    formation as any,
+    "HOME",
+  );
   const usedPlayerIds = new Set(slots.values());
   const bench = players.filter((p) => !usedPlayerIds.has(p.id));
 
   function assignSlot(slotIndex: number) {
     if (!selectedPlayer) return;
-    // Remove player from any existing slot
     const newSlots = new Map(slots);
+    // Remove selected player from any previous slot
     for (const [si, pid] of newSlots.entries()) {
       if (pid === selectedPlayer.id) newSlots.delete(si);
     }
-    // If slot already occupied, send that player to bench (remove from slot)
+    // Overwrite slot (bumps previous occupant to bench automatically)
     newSlots.set(slotIndex, selectedPlayer.id);
     setSlots(newSlots);
+    setSelectedPlayer(null); // clear selection after assignment
+  }
+
+  function resetFormation() {
+    setSlots(new Map());
     setSelectedPlayer(null);
+    setMsg(null);
   }
 
   async function saveFormation() {
@@ -128,43 +122,52 @@ function SquadContent() {
 
   return (
     <div className="page">
+      {/* Header */}
       <div
         style={{
           display: "flex",
           alignItems: "center",
           gap: 14,
-          marginBottom: 24,
+          marginBottom: 16,
+          flexWrap: "wrap",
         }}
       >
         {team.logoSvg && (
           <div
-            style={{ width: 56, height: 64, flexShrink: 0 }}
+            style={{ width: 48, flexShrink: 0 }}
             dangerouslySetInnerHTML={{ __html: team.logoSvg }}
           />
         )}
-        <div>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div className="eyebrow">Your Club</div>
           <h1
-            style={{ fontSize: "2rem", textTransform: "uppercase", margin: 0 }}
+            style={{
+              fontSize: "clamp(1.2rem, 3vw, 2rem)",
+              textTransform: "uppercase",
+              margin: 0,
+            }}
           >
             {team.name}
           </h1>
-          <div style={{ color: "var(--ink-dim)", fontSize: 13, marginTop: 2 }}>
+          <div style={{ color: "var(--ink-dim)", fontSize: 12, marginTop: 2 }}>
             Budget:{" "}
             <span
               style={{ color: "var(--ws-gold)", fontFamily: "var(--mono)" }}
             >
               £{team.budget.toLocaleString()}
-            </span>{" "}
-            · {players.length} Players in Squad
+            </span>
+            {" · "}
+            {players.length} Players
           </div>
         </div>
+
+        {/* Controls */}
         <div
           style={{
-            marginLeft: "auto",
             display: "flex",
-            gap: 12,
+            gap: 8,
             alignItems: "center",
+            flexWrap: "wrap",
           }}
         >
           <select
@@ -172,17 +175,47 @@ function SquadContent() {
             onChange={(e) => {
               setFormation(e.target.value);
               setSlots(new Map());
+              setSelectedPlayer(null);
+            }}
+            style={{
+              padding: "8px 10px",
+              borderRadius: 6,
+              background: "var(--panel-bg)",
+              border: "1px solid var(--border)",
+              color: "var(--ink)",
+              fontSize: 13,
             }}
           >
             {FORMATIONS.map((f) => (
               <option key={f}>{f}</option>
             ))}
           </select>
+
+          {/* Reset button — poin 2 */}
+          <button
+            onClick={resetFormation}
+            disabled={slots.size === 0}
+            style={{
+              padding: "8px 14px",
+              borderRadius: 6,
+              border: "1px solid var(--border)",
+              background: "transparent",
+              color: slots.size === 0 ? "var(--ink-dim)" : "#ff9800",
+              cursor: slots.size === 0 ? "not-allowed" : "pointer",
+              fontSize: 12,
+              fontFamily: "var(--display)",
+              textTransform: "uppercase",
+              letterSpacing: 1,
+            }}
+          >
+            ↺ Reset
+          </button>
+
           <button
             onClick={saveFormation}
             disabled={saving || slots.size !== 11}
             style={{
-              padding: "10px 20px",
+              padding: "8px 16px",
               borderRadius: 6,
               border: "none",
               background:
@@ -200,44 +233,72 @@ function SquadContent() {
           </button>
         </div>
       </div>
+
       {msg && (
-        <p
+        <div
           style={{
-            color: msg.startsWith("✓")
-              ? "var(--ws-green-bright)"
-              : "var(--home-color)",
+            padding: "8px 14px",
+            borderRadius: 6,
             marginBottom: 12,
+            fontSize: 13,
+            background: msg.startsWith("✓")
+              ? "rgba(46,204,113,0.1)"
+              : "rgba(255,82,82,0.1)",
+            color: msg.startsWith("✓") ? "var(--ws-green-bright)" : "#ff5252",
+            border: `1px solid ${msg.startsWith("✓") ? "rgba(46,204,113,0.3)" : "rgba(255,82,82,0.3)"}`,
           }}
         >
           {msg}
-        </p>
+        </div>
       )}
 
+      {/* Instruction banner */}
       <div
-        style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 16 }}
+        style={{
+          padding: "8px 14px",
+          borderRadius: 6,
+          marginBottom: 12,
+          background: "rgba(255,255,255,0.04)",
+          border: "1px solid var(--border)",
+          fontSize: 12,
+          color: "var(--ink-dim)",
+        }}
+      >
+        {selectedPlayer ? (
+          <span>
+            📍 Click any slot to place{" "}
+            <strong style={{ color: "var(--ws-gold)" }}>
+              {selectedPlayer.name}
+            </strong>{" "}
+            — or click the same slot again to deselect
+          </span>
+        ) : (
+          <span>
+            👆 Select a player from the bench, then click a formation slot to
+            assign them
+          </span>
+        )}
+      </div>
+
+      {/* Main grid */}
+      <div
+        className="squad-grid"
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr clamp(240px, 30vw, 320px)",
+          gap: 12,
+        }}
       >
         {/* PITCH */}
-        <div className="panel" style={{ padding: 12 }}>
-          <div
-            style={{
-              color: "var(--ink-dim)",
-              fontSize: 12,
-              fontFamily: "var(--display)",
-              textTransform: "uppercase",
-              letterSpacing: 1,
-              marginBottom: 8,
-            }}
-          >
-            {selectedPlayer
-              ? `Click a slot to place ${selectedPlayer.name}`
-              : "Click a player below, then click a slot to assign"}
-          </div>
+        <div className="panel" style={{ padding: 10 }}>
           <div
             style={{
               position: "relative",
               width: "100%",
               aspectRatio: "105/68",
-              background: "linear-gradient(180deg, #1e5631 0%, #184a28 100%)",
+              background: "linear-gradient(160deg, #1a5c2e 0%, #14452210 100%)",
+              backgroundImage:
+                "repeating-linear-gradient(0deg, rgba(255,255,255,0.03) 0px, rgba(255,255,255,0.03) 1px, transparent 1px, transparent 20px)",
               borderRadius: 6,
               overflow: "hidden",
             }}
@@ -259,94 +320,162 @@ function SquadContent() {
                 width="99"
                 height="62"
                 fill="none"
-                stroke="rgba(255,255,255,0.3)"
-                strokeWidth="0.8"
+                stroke="rgba(255,255,255,0.25)"
+                strokeWidth="0.7"
               />
               <line
                 x1="52.5"
                 y1="3"
                 x2="52.5"
                 y2="65"
-                stroke="rgba(255,255,255,0.3)"
-                strokeWidth="0.8"
+                stroke="rgba(255,255,255,0.25)"
+                strokeWidth="0.7"
               />
               <circle
                 cx="52.5"
                 cy="34"
                 r="9.15"
                 fill="none"
-                stroke="rgba(255,255,255,0.3)"
-                strokeWidth="0.8"
+                stroke="rgba(255,255,255,0.25)"
+                strokeWidth="0.7"
+              />
+              <circle cx="52.5" cy="34" r="0.5" fill="rgba(255,255,255,0.4)" />
+              {/* Home penalty area */}
+              <rect
+                x="3"
+                y="15"
+                width="16.5"
+                height="38"
+                fill="none"
+                stroke="rgba(255,255,255,0.2)"
+                strokeWidth="0.6"
               />
               <rect
                 x="3"
-                y="19"
-                width="16.5"
-                height="30"
+                y="22.5"
+                width="5.5"
+                height="23"
                 fill="none"
-                stroke="rgba(255,255,255,0.3)"
+                stroke="rgba(255,255,255,0.15)"
+                strokeWidth="0.5"
+              />
+              {/* Away penalty area */}
+              <rect
+                x="85.5"
+                y="15"
+                width="16.5"
+                height="38"
+                fill="none"
+                stroke="rgba(255,255,255,0.2)"
                 strokeWidth="0.6"
               />
               <rect
-                x="85.5"
-                y="19"
-                width="16.5"
-                height="30"
+                x="96.5"
+                y="22.5"
+                width="5.5"
+                height="23"
                 fill="none"
-                stroke="rgba(255,255,255,0.3)"
-                strokeWidth="0.6"
+                stroke="rgba(255,255,255,0.15)"
+                strokeWidth="0.5"
+              />
+              {/* Corner arcs */}
+              <path
+                d="M3,4.5 A1.5,1.5 0 0,1 4.5,3"
+                fill="none"
+                stroke="rgba(255,255,255,0.15)"
+                strokeWidth="0.5"
+              />
+              <path
+                d="M100.5,3 A1.5,1.5 0 0,1 102,4.5"
+                fill="none"
+                stroke="rgba(255,255,255,0.15)"
+                strokeWidth="0.5"
+              />
+              <path
+                d="M3,63.5 A1.5,1.5 0 0,0 4.5,65"
+                fill="none"
+                stroke="rgba(255,255,255,0.15)"
+                strokeWidth="0.5"
+              />
+              <path
+                d="M100.5,65 A1.5,1.5 0 0,0 102,63.5"
+                fill="none"
+                stroke="rgba(255,255,255,0.15)"
+                strokeWidth="0.5"
               />
             </svg>
-            {/* Formation slots */}
-            {pitchSlots.map((pos, slotIdx) => {
+
+            {/* Formation slots — poin 1 & 3: label with role name */}
+            {pitchSlots.map((slot, slotIdx) => {
               const occupantId = slots.get(slotIdx);
               const occupant = players.find((p) => p.id === occupantId);
-              const isEmpty = !occupant;
+              const isSelected =
+                !!selectedPlayer && occupant?.id === selectedPlayer.id;
+              const isTargetable = !!selectedPlayer; // highlight empty slots when player selected
+
               return (
                 <div
                   key={slotIdx}
                   onClick={() => {
                     if (selectedPlayer) {
-                      // A player is selected from the bench (or another slot) —
-                      // assign them here, replacing whoever currently occupies this slot.
-                      // The previously selected player's old slot (if any) is cleared
-                      // inside assignSlot, and the bumped occupant (if any) simply
-                      // returns to the bench since slots is keyed by slotIndex.
-                      assignSlot(slotIdx);
+                      // poin 8: clicking same occupant while selected = deselect (not re-select)
+                      if (occupant?.id === selectedPlayer.id) {
+                        setSelectedPlayer(null);
+                      } else {
+                        assignSlot(slotIdx);
+                      }
                     } else if (occupant) {
-                      // No one selected yet — clicking an occupied slot selects
-                      // that player so the user can then move them elsewhere.
                       setSelectedPlayer(occupant);
                     }
                   }}
                   style={{
                     position: "absolute",
-                    left: `${pos.x}%`,
-                    top: `${pos.y}%`,
+                    left: `${slot.x}%`,
+                    top: `${slot.y}%`,
                     transform: "translate(-50%, -50%)",
-                    width: 44,
-                    height: 44,
+                    width: 48,
+                    height: 56,
                     cursor: "pointer",
                     display: "flex",
                     flexDirection: "column",
                     alignItems: "center",
-                    gap: 2,
+                    gap: 1,
+                    zIndex: isSelected ? 2 : 1,
                   }}
                 >
+                  {/* Position label above slot — poin 1 & 3 */}
+                  <div
+                    style={{
+                      fontSize: 8,
+                      fontWeight: 700,
+                      letterSpacing: 0.5,
+                      color: POS_GROUP_COLOR[slot.posGroup],
+                      background: "rgba(0,0,0,0.65)",
+                      padding: "1px 4px",
+                      borderRadius: 3,
+                      textTransform: "uppercase",
+                      border: `1px solid ${POS_GROUP_COLOR[slot.posGroup]}44`,
+                    }}
+                  >
+                    {slot.label}
+                  </div>
+
                   {occupant ? (
                     <>
                       <div
                         style={{
-                          width: 36,
-                          height: 36,
+                          width: 34,
+                          height: 34,
                           borderRadius: "50%",
                           background: team.jerseyColor,
-                          border:
-                            selectedPlayer?.id === occupant.id
-                              ? "2px solid var(--ws-gold)"
-                              : "2px solid rgba(255,255,255,0.8)",
+                          border: isSelected
+                            ? "2.5px solid var(--ws-gold)"
+                            : "2px solid rgba(255,255,255,0.85)",
                           overflow: "hidden",
-                          boxShadow: "0 2px 8px rgba(0,0,0,0.4)",
+                          boxShadow: isSelected
+                            ? "0 0 12px rgba(255,215,0,0.6)"
+                            : "0 2px 6px rgba(0,0,0,0.5)",
+                          flexShrink: 0,
                         }}
                         dangerouslySetInnerHTML={{
                           __html: occupant.avatarSvg ?? "",
@@ -354,18 +483,18 @@ function SquadContent() {
                       />
                       <span
                         style={{
-                          fontSize: "6px",
+                          fontSize: 7,
                           color: "#fff",
-                          background: "rgba(0,0,0,0.6)",
-                          padding: "1px 3px",
+                          background: "rgba(0,0,0,0.7)",
+                          padding: "1px 4px",
                           borderRadius: 2,
-                          maxWidth: 44,
+                          maxWidth: 46,
                           overflow: "hidden",
                           textOverflow: "ellipsis",
                           whiteSpace: "nowrap",
                         }}
                       >
-                        {occupant.name.split(" ").pop()}
+                        {occupant.name.split(" ").slice(-1)[0]}
                       </span>
                     </>
                   ) : (
@@ -374,19 +503,29 @@ function SquadContent() {
                         width: 32,
                         height: 32,
                         borderRadius: "50%",
-                        background: selectedPlayer
-                          ? "rgba(255,215,0,0.2)"
-                          : "rgba(255,255,255,0.1)",
-                        border: selectedPlayer
-                          ? "2px dashed var(--ws-gold)"
-                          : "2px dashed rgba(255,255,255,0.3)",
+                        background: isTargetable
+                          ? "rgba(255,215,0,0.15)"
+                          : "rgba(255,255,255,0.06)",
+                        border: isTargetable
+                          ? "2px dashed rgba(255,215,0,0.7)"
+                          : "2px dashed rgba(255,255,255,0.2)",
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        fontSize: 14,
+                        transition: "all 0.15s",
                       }}
                     >
-                      {selectedPlayer ? "+" : "·"}
+                      {isTargetable && (
+                        <span
+                          style={{
+                            color: "rgba(255,215,0,0.8)",
+                            fontSize: 14,
+                            lineHeight: 1,
+                          }}
+                        >
+                          +
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>
@@ -395,7 +534,7 @@ function SquadContent() {
           </div>
         </div>
 
-        {/* BENCH / SQUAD LIST */}
+        {/* BENCH */}
         <div
           className="panel"
           style={{
@@ -409,21 +548,38 @@ function SquadContent() {
               padding: "10px 12px",
               borderBottom: "1px solid var(--border)",
               fontFamily: "var(--display)",
-              fontSize: 12,
+              fontSize: 11,
               textTransform: "uppercase",
               letterSpacing: 1,
               color: "var(--ink-dim)",
+              display: "flex",
+              justifyContent: "space-between",
             }}
           >
-            Bench — {bench.length} Players
+            <span>Bench — {bench.length}</span>
+            <span style={{ color: "var(--ws-gold)" }}>
+              {slots.size}/11 placed
+            </span>
           </div>
           <div
             className="scroll-thin"
-            style={{ flex: 1, overflowY: "auto", padding: 8, maxHeight: 520 }}
+            style={{
+              flex: 1,
+              overflowY: "auto",
+              padding: 6,
+              maxHeight: "55vh",
+            }}
           >
             {bench.length === 0 && (
-              <p style={{ color: "var(--ink-dim)", fontSize: 13, padding: 8 }}>
-                All players assigned to formation.
+              <p
+                style={{
+                  color: "var(--ink-dim)",
+                  fontSize: 12,
+                  padding: "12px 8px",
+                  textAlign: "center",
+                }}
+              >
+                ✓ All players assigned
               </p>
             )}
             {bench.map((p) => (
@@ -431,6 +587,7 @@ function SquadContent() {
                 key={p.id}
                 player={p}
                 selected={selectedPlayer?.id === p.id}
+                // poin 8: clicking selected player in bench = deselect
                 onClick={() =>
                   setSelectedPlayer(selectedPlayer?.id === p.id ? null : p)
                 }
@@ -440,9 +597,9 @@ function SquadContent() {
         </div>
       </div>
 
-      {/* Full squad at bottom */}
+      {/* Selected player detail */}
       {selectedPlayer && (
-        <div className="panel" style={{ marginTop: 16, padding: 14 }}>
+        <div className="panel" style={{ marginTop: 12, padding: 14 }}>
           <PlayerDetailCard
             player={selectedPlayer}
             jerseyColor={team.jerseyColor}
@@ -468,22 +625,22 @@ function PlayerCard({
       style={{
         display: "flex",
         alignItems: "center",
-        gap: 10,
-        padding: "8px 10px",
+        gap: 8,
+        padding: "7px 8px",
         borderRadius: 6,
         cursor: "pointer",
-        marginBottom: 4,
+        marginBottom: 3,
         background: selected ? "rgba(255,215,0,0.1)" : "transparent",
         border: selected
-          ? "1px solid rgba(255,215,0,0.4)"
+          ? "1px solid rgba(255,215,0,0.5)"
           : "1px solid transparent",
-        transition: "all 0.15s",
+        transition: "all 0.12s",
       }}
     >
       <div
         style={{
-          width: 36,
-          height: 36,
+          width: 32,
+          height: 32,
           flexShrink: 0,
           borderRadius: "50%",
           overflow: "hidden",
@@ -503,17 +660,31 @@ function PlayerCard({
         >
           {player.name}
         </div>
-        <div style={{ fontSize: 11, color: "var(--ink-dim)" }}>
-          {player.position} · {"★".repeat(player.starRating)}
+        <div style={{ fontSize: 10, color: "var(--ink-dim)" }}>
+          <span
+            style={{
+              padding: "1px 5px",
+              borderRadius: 3,
+              marginRight: 4,
+              background: `${POS_GROUP_COLOR[posGroup(player.position)]}22`,
+              color: POS_GROUP_COLOR[posGroup(player.position)],
+              fontWeight: 700,
+              fontSize: 9,
+            }}
+          >
+            {player.position}
+          </span>
+          {"★".repeat(player.starRating)}
           {"☆".repeat(5 - player.starRating)}
         </div>
       </div>
       <div
         style={{
-          fontSize: 11,
+          fontSize: 10,
           fontFamily: "var(--mono)",
           color: "var(--ws-gold)",
           textAlign: "right",
+          flexShrink: 0,
         }}
       >
         {player.pace}/{player.shooting}/{player.passing}
@@ -537,33 +708,38 @@ function PlayerDetailCard({
     { label: "STA", val: player.stamina },
   ];
   return (
-    <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
+    <div
+      style={{
+        display: "flex",
+        gap: 14,
+        alignItems: "flex-start",
+        flexWrap: "wrap",
+      }}
+    >
       <div
-        style={{ width: 80, flexShrink: 0 }}
+        style={{ width: 64, flexShrink: 0 }}
         dangerouslySetInnerHTML={{ __html: player.avatarSvg ?? "" }}
       />
-      <div style={{ flex: 1 }}>
+      <div style={{ flex: 1, minWidth: 160 }}>
         <div
           style={{
             fontFamily: "var(--display)",
-            fontSize: "1.2rem",
+            fontSize: "1.1rem",
             textTransform: "uppercase",
           }}
         >
           {player.name}
         </div>
-        <div
-          style={{ fontSize: 12, color: "var(--ink-dim)", marginBottom: 10 }}
-        >
+        <div style={{ fontSize: 11, color: "var(--ink-dim)", marginBottom: 8 }}>
           {player.nationality} · {player.age} yrs · {player.position}
         </div>
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           {stats.map((s) => (
             <div key={s.label} style={{ textAlign: "center" }}>
               <div
                 style={{
                   fontFamily: "var(--mono)",
-                  fontSize: "1.2rem",
+                  fontSize: "1.1rem",
                   fontWeight: 700,
                   color: statColor(s.val),
                 }}
@@ -572,7 +748,7 @@ function PlayerDetailCard({
               </div>
               <div
                 style={{
-                  fontSize: 9,
+                  fontSize: 8,
                   textTransform: "uppercase",
                   letterSpacing: 1,
                   color: "var(--ink-dim)",
@@ -583,8 +759,8 @@ function PlayerDetailCard({
             </div>
           ))}
         </div>
-        <div style={{ marginTop: 8, fontSize: 12, color: "var(--ink-dim)" }}>
-          Market Value:{" "}
+        <div style={{ marginTop: 6, fontSize: 11, color: "var(--ink-dim)" }}>
+          Value:{" "}
           <span style={{ color: "var(--ws-gold)", fontFamily: "var(--mono)" }}>
             £{player.marketValue.toLocaleString()}
           </span>
@@ -592,6 +768,13 @@ function PlayerDetailCard({
       </div>
     </div>
   );
+}
+
+function posGroup(pos: string): string {
+  if (pos === "GK") return "GK";
+  if (pos === "DF") return "DF";
+  if (pos === "MF") return "MF";
+  return "FW";
 }
 
 function statColor(val: number): string {

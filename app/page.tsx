@@ -103,6 +103,7 @@ export default function HomePage() {
     fixtures.find((f) => f.awayTeam.isUserControlled)?.awayTeam.name ??
     "—";
 
+  const userTeamName = userClubName; // alias used in table row badge
   const topTeamName = table.length > 0 ? table[0].teamName.split(" ")[0] : "—";
 
   return (
@@ -225,15 +226,16 @@ export default function HomePage() {
             <table
               style={{
                 fontSize: 12.5,
-                minWidth: 380,
+                minWidth: 320,
                 whiteSpace: "nowrap",
                 width: "100%",
+                tableLayout: "fixed",
               }}
             >
               <thead>
                 <tr style={{ background: "var(--panel-bg)" }}>
-                  <th style={thStyle("left", true)}>#</th>
-                  <th style={{ ...thStyle("left"), minWidth: 100 }}>Team</th>
+                  <th style={{ ...thStyle("left", true), width: 28 }}>#</th>
+                  <th style={{ ...thStyle("left") }}>Team</th>
                   <th style={thStyle()}>P</th>
                   <th style={thStyle()}>W</th>
                   <th style={thStyle()}>D</th>
@@ -267,10 +269,35 @@ export default function HomePage() {
                         ...tdStyle("left"),
                         overflow: "hidden",
                         textOverflow: "ellipsis",
-                        maxWidth: 130,
+                        width: "100%",
+                        maxWidth: 0,
                       }}
                     >
-                      {row.teamName}
+                      <span
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                        }}
+                      >
+                        {row.teamName}
+                        {row.teamName === userTeamName && (
+                          <span
+                            style={{
+                              fontSize: 9,
+                              padding: "1px 5px",
+                              borderRadius: 3,
+                              background: "rgba(255,215,0,0.15)",
+                              color: "var(--ws-gold)",
+                              border: "1px solid rgba(255,215,0,0.3)",
+                              fontWeight: 700,
+                              flexShrink: 0,
+                            }}
+                          >
+                            YOU
+                          </span>
+                        )}
+                      </span>
                     </td>
                     <td style={tdStyle()}>{row.played}</td>
                     <td style={tdStyle()}>{row.won}</td>
