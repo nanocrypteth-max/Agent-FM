@@ -37,33 +37,39 @@ interface FixtureData {
 }
 
 const EVENT_ICONS: Record<string, string> = {
-  KICK_OFF: "🟢",
-  GOAL: "⚽",
+  KICK_OFF: "⚽",
+  GOAL: "🥅",
   SHOT: "🎯",
+  SHOT_OFF: "↗",
   SAVE: "🧤",
   FOUL: "⚠️",
+  FREE_KICK: "🔵",
   YELLOW_CARD: "🟨",
   RED_CARD: "🟥",
-  CORNER: "↪",
+  CORNER: "🚩",
   OFFSIDE: "🚩",
   SUBSTITUTION: "🔄",
   HALF_TIME: "⏱",
   FULL_TIME: "🏁",
 };
 
-const EVENT_LABELS: Record<string, string> = {
-  KICK_OFF: "Kick-off!",
-  GOAL: "GOAL!",
-  SHOT: "Shot attempt",
-  SAVE: "Great save!",
-  FOUL: "Foul committed",
-  YELLOW_CARD: "Yellow card",
-  RED_CARD: "Red card",
-  CORNER: "Corner kick",
-  OFFSIDE: "Offside",
-  SUBSTITUTION: "Substitution",
-  HALF_TIME: "Half-time",
-  FULL_TIME: "Full-time",
+// Only show meaningful events in commentary — skip KICK_OFF to reduce noise
+const COMMENTARY_SKIP = new Set(["KICK_OFF"]);
+
+const EVENT_LABELS: Record<string, (team: string, minute: number) => string> = {
+  GOAL: (t) => `GOAL! ${t} find the net!`,
+  SHOT: (t) => `${t} test the keeper`,
+  SHOT_OFF: (t) => `${t} shot goes wide`,
+  SAVE: (t) => `Goalkeeper saves for ${t}`,
+  FOUL: (t) => `Foul by ${t}`,
+  FREE_KICK: (t) => `Free kick — ${t}`,
+  YELLOW_CARD: (t) => `Yellow card — ${t} player booked`,
+  RED_CARD: (t) => `Red card! ${t} down to 10 men`,
+  CORNER: (t) => `Corner kick for ${t}`,
+  OFFSIDE: (t) => `${t} caught offside`,
+  SUBSTITUTION: (t) => `${t} make a change`,
+  HALF_TIME: () => "Half time — teams head to the dressing room",
+  FULL_TIME: () => "Full time! The referee blows the final whistle",
 };
 
 export default function MatchPage() {
@@ -519,60 +525,54 @@ function MatchContent() {
         </div>
       </div>
 
+      {/* Pitch — vertical, full width */}
       <div
-        style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 12 }}
+        className="panel"
+        style={{ padding: 12, marginBottom: 12, position: "relative" }}
       >
-        {/* Pitch */}
+        {goalFlash > 0 && <div key={goalFlash} className="ws-goal-flash" />}
         <div
-          className="panel"
           style={{
-            padding: 12,
             display: "flex",
-            flexDirection: "column",
-            gap: 10,
-            position: "relative",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 8,
+            fontFamily: "var(--display)",
+            fontSize: "0.8rem",
+            textTransform: "uppercase",
+            letterSpacing: 1.5,
+            color: "var(--ink-dim)",
           }}
         >
-          {goalFlash > 0 && <div key={goalFlash} className="ws-goal-flash" />}
-          <div
+          <span>2D Match View</span>
+          <span
+            className={matchOver ? "" : "ws-live-badge"}
             style={{
               display: "flex",
-              justifyContent: "space-between",
               alignItems: "center",
-              fontFamily: "var(--display)",
-              fontSize: "0.8rem",
-              textTransform: "uppercase",
-              letterSpacing: 1.5,
-              color: "var(--ink-dim)",
+              gap: 6,
+              color: matchOver ? "var(--ink-dim)" : undefined,
             }}
           >
-            <span>2D Match View</span>
-            <span
-              className={matchOver ? "" : "ws-live-badge"}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                color: matchOver ? "var(--ink-dim)" : undefined,
-              }}
-            >
-              {!matchOver && <span className="live-dot" />}
-              {matchOver ? "FULL TIME" : "LIVE"}
-            </span>
-          </div>
-          <PitchView
-            events={events}
-            homeStartingXI={data.homeTactics!.startingXI}
-            awayStartingXI={data.awayTactics!.startingXI}
-            homeFormationSlots={homeSlots}
-            awayFormationSlots={awaySlots}
-            speed={speed}
-            onMinuteChange={handleMinuteChange}
-            paused={matchOver}
-          />
+            {!matchOver && <span className="live-dot" />}
+            {matchOver ? "FULL TIME" : "LIVE"}
+          </span>
         </div>
+        <PitchView
+          events={events}
+          homeStartingXI={data.homeTactics!.startingXI}
+          awayStartingXI={data.awayTactics!.startingXI}
+          homeFormationSlots={homeSlots}
+          awayFormationSlots={awaySlots}
+          speed={speed}
+          onMinuteChange={handleMinuteChange}
+          paused={matchOver}
+          vertical
+        />
+      </div>
 
-        {/* Right panel */}
+      {/* Commentary + AI Decision below pitch */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
         <div
           className="panel"
           style={{
@@ -595,7 +595,6 @@ function MatchContent() {
               onClick={() => setActiveTab("ai")}
             />
           </div>
-
           {activeTab === "commentary" ? (
             <div
               className="scroll-thin"
@@ -603,27 +602,30 @@ function MatchContent() {
                 flex: 1,
                 overflowY: "auto",
                 padding: 8,
-                maxHeight: 480,
+                maxHeight: 320,
                 display: "flex",
                 flexDirection: "column",
                 gap: 2,
               }}
             >
-              {feed.length === 0 && (
+              {feed.filter((ev) => !COMMENTARY_SKIP.has(ev.type)).length ===
+                0 && (
                 <p
                   style={{ color: "var(--ink-dim)", fontSize: 13, padding: 8 }}
                 >
                   Match starting...
                 </p>
               )}
-              {feed.map((ev, i) => (
-                <FeedItem
-                  key={i}
-                  event={ev}
-                  homeTeamName={data.homeTeam.name}
-                  awayTeamName={data.awayTeam.name}
-                />
-              ))}
+              {feed
+                .filter((ev) => !COMMENTARY_SKIP.has(ev.type))
+                .map((ev, i) => (
+                  <FeedItem
+                    key={i}
+                    event={ev}
+                    homeTeamName={data.homeTeam.name}
+                    awayTeamName={data.awayTeam.name}
+                  />
+                ))}
             </div>
           ) : (
             <div
@@ -632,7 +634,7 @@ function MatchContent() {
                 flex: 1,
                 overflowY: "auto",
                 padding: 14,
-                maxHeight: 480,
+                maxHeight: 320,
               }}
             >
               <DecisionCard
@@ -647,6 +649,126 @@ function MatchContent() {
               />
             </div>
           )}
+        </div>
+
+        {/* Mini stats panel */}
+        <div className="panel" style={{ padding: 14 }}>
+          <div
+            style={{
+              fontFamily: "var(--display)",
+              fontSize: 11,
+              textTransform: "uppercase",
+              letterSpacing: 1,
+              color: "var(--ink-dim)",
+              marginBottom: 12,
+            }}
+          >
+            Match Stats
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {[
+              {
+                label: "Shots",
+                home: feed.filter(
+                  (e) =>
+                    e.team === "HOME" &&
+                    (e.type === "SHOT" || e.type === "GOAL"),
+                ).length,
+                away: feed.filter(
+                  (e) =>
+                    e.team === "AWAY" &&
+                    (e.type === "SHOT" || e.type === "GOAL"),
+                ).length,
+              },
+              {
+                label: "Saves",
+                home: feed.filter((e) => e.team === "HOME" && e.type === "SAVE")
+                  .length,
+                away: feed.filter((e) => e.team === "AWAY" && e.type === "SAVE")
+                  .length,
+              },
+              {
+                label: "Fouls",
+                home: feed.filter((e) => e.team === "HOME" && e.type === "FOUL")
+                  .length,
+                away: feed.filter((e) => e.team === "AWAY" && e.type === "FOUL")
+                  .length,
+              },
+              {
+                label: "Yellows",
+                home: feed.filter(
+                  (e) => e.team === "HOME" && e.type === "YELLOW_CARD",
+                ).length,
+                away: feed.filter(
+                  (e) => e.team === "AWAY" && e.type === "YELLOW_CARD",
+                ).length,
+              },
+            ].map((s) => (
+              <div key={s.label}>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    fontSize: 11,
+                    marginBottom: 3,
+                  }}
+                >
+                  <span
+                    style={{
+                      fontFamily: "var(--mono)",
+                      color: "var(--home-color)",
+                      fontWeight: 700,
+                    }}
+                  >
+                    {s.home}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 10,
+                      color: "var(--ink-dim)",
+                      textTransform: "uppercase",
+                      letterSpacing: 0.5,
+                    }}
+                  >
+                    {s.label}
+                  </span>
+                  <span
+                    style={{
+                      fontFamily: "var(--mono)",
+                      color: "var(--away-color)",
+                      fontWeight: 700,
+                    }}
+                  >
+                    {s.away}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    height: 4,
+                    background: "var(--border)",
+                    borderRadius: 2,
+                    overflow: "hidden",
+                    display: "flex",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: `${(s.home / Math.max(s.home + s.away, 1)) * 100}%`,
+                      background: "var(--home-color)",
+                      transition: "width 0.4s",
+                    }}
+                  />
+                  <div
+                    style={{
+                      width: `${(s.away / Math.max(s.home + s.away, 1)) * 100}%`,
+                      background: "var(--away-color)",
+                      transition: "width 0.4s",
+                    }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -798,41 +920,46 @@ function FeedItem({
   const color =
     event.team === "HOME" ? "var(--home-color)" : "var(--away-color)";
   const isGoal = event.type === "GOAL";
+  const isCard = event.type === "YELLOW_CARD" || event.type === "RED_CARD";
+  const labelFn = EVENT_LABELS[event.type];
+  const label = labelFn ? labelFn(teamName, event.minute) : event.type;
 
   return (
     <div
       style={{
         display: "flex",
-        gap: 10,
-        padding: 8,
+        gap: 8,
+        padding: "6px 8px",
         borderRadius: 4,
-        fontSize: 13,
-        alignItems: "flex-start",
+        fontSize: 12,
+        alignItems: "center",
         background: isGoal ? "rgba(255,209,102,0.08)" : "transparent",
         borderLeft: isGoal
-          ? "2px solid var(--accent)"
-          : "2px solid transparent",
+          ? "2px solid var(--ws-gold)"
+          : isCard
+            ? "2px solid #ff9800"
+            : "2px solid transparent",
       }}
     >
       <span
         style={{
           fontFamily: "var(--mono)",
           color: "var(--ink-dim)",
-          fontSize: 12,
-          minWidth: 28,
-          paddingTop: 1,
+          fontSize: 11,
+          minWidth: 26,
+          flexShrink: 0,
         }}
       >
         {event.minute}'
       </span>
-      <span style={{ width: 18, textAlign: "center" }}>
-        {EVENT_ICONS[event.type] ?? "•"}
-      </span>
-      <span style={{ lineHeight: 1.4 }}>
-        {event.type !== "HALF_TIME" && event.type !== "FULL_TIME" && (
-          <span style={{ fontWeight: 600, color }}>{teamName}</span>
-        )}{" "}
-        — {EVENT_LABELS[event.type] ?? event.type}
+      <span style={{ flexShrink: 0 }}>{EVENT_ICONS[event.type] ?? "•"}</span>
+      <span
+        style={{
+          lineHeight: 1.4,
+          color: isGoal ? "var(--ws-gold)" : "var(--ink)",
+        }}
+      >
+        {label}
       </span>
     </div>
   );

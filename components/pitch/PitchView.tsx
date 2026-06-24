@@ -11,8 +11,9 @@ interface PitchViewProps {
   awayFormationSlots: Position2D[];
   speed?: number;
   onMinuteChange?: (minute: number, eventsThisMinute: MatchEvent[]) => void;
-  /** If true, playback is paused (no new events applied) */
   paused?: boolean;
+  /** If true, pitch renders vertically (portrait) — home attacks upward */
+  vertical?: boolean;
 }
 
 const PLAYER_RADIUS_PCT = 0.021;
@@ -46,10 +47,12 @@ export default function PitchView({
   speed = 1,
   onMinuteChange,
   paused = false,
+  vertical = false,
 }: PitchViewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const animFrameRef = useRef<number>();
+  const prevStartingXIRef = useRef<string>("");
 
   const [eventIndex, setEventIndex] = useState(0);
   const playersRef = useRef<Map<string, PlayerState>>(new Map());
@@ -64,7 +67,10 @@ export default function PitchView({
   });
 
   // Track previous startingXI to avoid spurious resets when parent re-renders
-  const prevStartingXIRef = useRef<string>("");
+  const verticalRef = useRef(vertical);
+  useEffect(() => {
+    verticalRef.current = vertical;
+  }, [vertical]);
 
   useEffect(() => {
     const key = JSON.stringify([homeStartingXI, awayStartingXI]);
@@ -202,7 +208,7 @@ export default function PitchView({
       const now = performance.now();
 
       ctx.clearRect(0, 0, width, height);
-      drawPitch(ctx, width, height);
+      drawPitch(ctx, width, height, verticalRef.current);
 
       for (const player of playersRef.current.values()) {
         const pos = interpolate(
@@ -218,6 +224,7 @@ export default function PitchView({
           height,
           PLAYER_RADIUS_PCT,
           player.team === "HOME" ? COLORS.home : COLORS.away,
+          verticalRef.current,
         );
       }
 
@@ -227,14 +234,21 @@ export default function PitchView({
         ballRef.current.transitionStart,
         now,
       );
-      drawBall(ctx, ballPos, width, height, BALL_RADIUS_PCT);
+      drawBall(
+        ctx,
+        ballPos,
+        width,
+        height,
+        BALL_RADIUS_PCT,
+        verticalRef.current,
+      );
 
       animFrameRef.current = requestAnimationFrame(draw);
     };
 
     const resize = () => {
       const w = container.clientWidth;
-      const h = w * (68 / 105);
+      const h = vertical ? w * (105 / 68) : w * (68 / 105);
       canvas.width = w;
       canvas.height = h;
     };
@@ -258,7 +272,25 @@ export default function PitchView({
   );
 }
 
-function drawPitch(ctx: CanvasRenderingContext2D, w: number, h: number) {
+// Convert game coords (0-100 x=left→right, y=top→bottom) to canvas pixels
+// In vertical mode: x (left→right in game) maps to canvas Y, y (top→bot) maps to canvas X
+function toCanvas(
+  pos: Position2D,
+  w: number,
+  h: number,
+  vertical: boolean,
+): [number, number] {
+  if (!vertical) return [(pos.x / 100) * w, (pos.y / 100) * h];
+  // Vertical: home attacks upward (from bottom). Flip x axis.
+  return [(pos.y / 100) * w, ((100 - pos.x) / 100) * h];
+}
+
+function drawPitch(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  vertical = false,
+) {
   const stripeCount = 9;
   const stripeWidth = w / stripeCount;
   for (let i = 0; i < stripeCount; i++) {
@@ -299,10 +331,10 @@ function drawPlayer(
   h: number,
   radiusPct: number,
   color: string,
+  vertical = false,
 ) {
-  const x = (pos.x / 100) * w;
-  const y = (pos.y / 100) * h;
-  const r = radiusPct * w;
+  const [x, y] = toCanvas(pos, w, h, vertical);
+  const r = radiusPct * Math.min(w, h);
 
   ctx.beginPath();
   ctx.arc(x, y, r, 0, Math.PI * 2);
@@ -319,10 +351,10 @@ function drawBall(
   w: number,
   h: number,
   radiusPct: number,
+  vertical = false,
 ) {
-  const x = (pos.x / 100) * w;
-  const y = (pos.y / 100) * h;
-  const r = radiusPct * w;
+  const [x, y] = toCanvas(pos, w, h, vertical);
+  const r = radiusPct * Math.min(w, h);
 
   // White circle base
   ctx.beginPath();

@@ -14,6 +14,7 @@ const NAV_ITEMS = [
   { href: "/squad", label: "Squad", icon: "⚽" },
   { href: "/train", label: "Train", icon: "💪" },
   { href: "/market", label: "Market", icon: "💰" },
+  { href: "/topup", label: "Top Up", icon: "💵" },
   { href: "/friendly", label: "Friendly", icon: "🤝" },
   { href: "/portal", label: "Portal", icon: "📨" },
   { href: "/gacha", label: "Spin", icon: "🎰" },

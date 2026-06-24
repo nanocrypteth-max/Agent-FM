@@ -326,6 +326,26 @@ model UserSession {
   lastSeenAt    DateTime @default(now())
 }
 
+// Game-owned players available for direct SOL purchase (3★-5★)
+model StorePlayer {
+  id          String   @id @default(cuid())
+  name        String
+  position    String
+  age         Int
+  nationality String
+  starRating  Int
+  pace        Int
+  shooting    Int
+  passing     Int
+  defending   Int
+  stamina     Int
+  avatarSvg   String?
+  available   Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  @@index([starRating, available])
+}
+
 model BoostLog {
   id          String   @id @default(cuid())
   playerId    String

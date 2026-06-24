@@ -42,6 +42,7 @@ export default function GachaPage() {
 function GachaContent({ walletAddress }: { walletAddress: string }) {
   const [spinning, setSpinning] = useState(false);
   const [result, setResult] = useState<SpinResult | null>(null);
+  const [packOpen, setPackOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [spinHistory, setSpinHistory] = useState<SpinResult[]>([]);
   const [animating, setAnimating] = useState(false);
@@ -55,6 +56,7 @@ function GachaContent({ walletAddress }: { walletAddress: string }) {
     setAnimating(true);
     setError(null);
     setResult(null);
+    setPackOpen(false);
 
     try {
       const phantom = (window as any).phantom?.solana ?? (window as any).solana;
@@ -95,6 +97,7 @@ function GachaContent({ walletAddress }: { walletAddress: string }) {
 
       setTimeout(() => {
         setResult({ player: data.player, tier });
+        setPackOpen(false); // show sealed pack first
         setSpinHistory((prev) => [
           { player: data.player, tier },
           ...prev.slice(0, 9),
@@ -211,7 +214,7 @@ function GachaContent({ walletAddress }: { walletAddress: string }) {
             />
           </div>
 
-          {/* Result */}
+          {/* Pack result with open animation */}
           {(animating || result) && (
             <div
               className="panel"
@@ -231,7 +234,7 @@ function GachaContent({ walletAddress }: { walletAddress: string }) {
                       display: "inline-block",
                     }}
                   >
-                    ⚽
+                    📦
                   </div>
                   <div
                     style={{
@@ -245,88 +248,258 @@ function GachaContent({ walletAddress }: { walletAddress: string }) {
                     Scouting talent...
                   </div>
                 </div>
-              ) : result ? (
-                <>
+              ) : result && !packOpen ? (
+                /* Sealed pack — click to reveal */
+                <div
+                  onClick={() => setPackOpen(true)}
+                  style={{ cursor: "pointer" }}
+                >
                   <div className="ws-goal-flash" key={result.player.name} />
+                  <div
+                    style={{
+                      width: 160,
+                      height: 220,
+                      margin: "0 auto 16px",
+                      background:
+                        result.tier === "PREMIUM"
+                          ? "linear-gradient(135deg, #1a0a00, #3d1f00, #ffd700)"
+                          : "linear-gradient(135deg, #0a1220, #1a2a40, #4fc3f7)",
+                      borderRadius: 16,
+                      border: `2px solid ${result.tier === "PREMIUM" ? "#ffd700" : "#4fc3f7"}`,
+                      boxShadow:
+                        result.tier === "PREMIUM"
+                          ? "0 0 40px rgba(255,215,0,0.5), 0 0 80px rgba(255,215,0,0.2)"
+                          : "0 0 40px rgba(79,195,247,0.4)",
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 8,
+                      animation: "pack-float 2s ease-in-out infinite",
+                      position: "relative",
+                      overflow: "hidden",
+                    }}
+                  >
+                    {/* Shine sweep */}
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        left: "-100%",
+                        width: "60%",
+                        height: "100%",
+                        background:
+                          "linear-gradient(90deg, transparent, rgba(255,255,255,0.15), transparent)",
+                        animation: "pack-shine 2s ease-in-out infinite",
+                      }}
+                    />
+                    <div style={{ fontSize: 48 }}>
+                      {result.tier === "PREMIUM" ? "🌟" : "⚽"}
+                    </div>
+                    <div
+                      style={{
+                        fontFamily: "var(--display)",
+                        fontSize: 11,
+                        textTransform: "uppercase",
+                        letterSpacing: 2,
+                        color:
+                          result.tier === "PREMIUM" ? "#ffd700" : "#4fc3f7",
+                      }}
+                    >
+                      {result.tier}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 9,
+                        color: "rgba(255,255,255,0.5)",
+                        textTransform: "uppercase",
+                        letterSpacing: 1,
+                      }}
+                    >
+                      Tap to open
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color: "var(--ink-dim)",
+                      animation: "pack-pulse 1.5s ease-in-out infinite",
+                    }}
+                  >
+                    👆 Tap the pack to reveal your player!
+                  </div>
+                  <style>{`
+                    @keyframes pack-float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-10px)} }
+                    @keyframes pack-shine { 0%{left:-100%} 60%,100%{left:150%} }
+                    @keyframes pack-pulse { 0%,100%{opacity:0.5} 50%{opacity:1} }
+                  `}</style>
+                </div>
+              ) : result && packOpen ? (
+                /* Card revealed */
+                <div
+                  style={{
+                    animation:
+                      "card-reveal 0.5s cubic-bezier(0.34,1.56,0.64,1) both",
+                  }}
+                >
                   <div
                     style={{
                       fontSize: 11,
                       color: "var(--ink-dim)",
                       textTransform: "uppercase",
                       letterSpacing: 2,
-                      marginBottom: 12,
+                      marginBottom: 16,
                     }}
                   >
-                    {result.tier} Capsule · New Signing!
+                    {result.tier} Pack · New Signing!
                   </div>
-                  <div
-                    style={{ width: 120, margin: "0 auto 12px" }}
-                    dangerouslySetInnerHTML={{
-                      __html: result.player.avatarSvg ?? "",
-                    }}
-                  />
+                  {/* Player card */}
                   <div
                     style={{
-                      fontFamily: "var(--display)",
-                      fontSize: "1.4rem",
-                      textTransform: "uppercase",
+                      width: 200,
+                      margin: "0 auto 16px",
+                      background:
+                        result.player.starRating >= 4
+                          ? "linear-gradient(160deg, #1a1000, #3d2800)"
+                          : "linear-gradient(160deg, #0a1220, #1a2035)",
+                      borderRadius: 14,
+                      border: `2px solid ${result.player.starRating >= 5 ? "#ffd700" : result.player.starRating >= 4 ? "#ff9800" : "#4fc3f7"}`,
+                      boxShadow:
+                        result.player.starRating >= 4
+                          ? "0 0 30px rgba(255,152,0,0.4)"
+                          : "0 0 20px rgba(79,195,247,0.2)",
+                      overflow: "hidden",
                     }}
                   >
-                    {result.player.name}
-                  </div>
-                  <div
-                    style={{
-                      color: "var(--ws-gold)",
-                      fontSize: 22,
-                      margin: "6px 0",
-                    }}
-                  >
-                    {"★".repeat(result.player.starRating)}
-                    {"☆".repeat(5 - result.player.starRating)}
-                  </div>
-                  <div style={{ color: "var(--ink-dim)", fontSize: 12 }}>
-                    {result.player.position} · Added to your squad
-                  </div>
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: 20,
-                      justifyContent: "center",
-                      marginTop: 14,
-                    }}
-                  >
-                    {(
-                      [
-                        ["PAC", result.player.pace],
-                        ["SHO", result.player.shooting],
-                        ["PAS", result.player.passing],
-                        ["DEF", result.player.defending],
-                      ] as [string, number][]
-                    ).map(([l, v]) => (
-                      <div key={l} style={{ textAlign: "center" }}>
+                    {/* Card header */}
+                    <div
+                      style={{
+                        padding: "10px 12px 0",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontFamily: "var(--mono)",
+                          fontSize: 28,
+                          fontWeight: 900,
+                          color:
+                            result.player.starRating >= 4
+                              ? "#ffd700"
+                              : "#4fc3f7",
+                        }}
+                      >
+                        {Math.round(
+                          (result.player.pace +
+                            result.player.shooting +
+                            result.player.passing +
+                            result.player.defending) /
+                            4,
+                        )}
+                      </div>
+                      <div style={{ textAlign: "right" }}>
                         <div
                           style={{
-                            fontFamily: "var(--mono)",
-                            fontSize: 20,
-                            fontWeight: 700,
-                            color: statColor(v),
-                          }}
-                        >
-                          {v}
-                        </div>
-                        <div
-                          style={{
+                            fontFamily: "var(--display)",
                             fontSize: 9,
-                            color: "var(--ink-dim)",
+                            color: "rgba(255,255,255,0.5)",
                             textTransform: "uppercase",
                           }}
                         >
-                          {l}
+                          {result.player.position}
+                        </div>
+                        <div style={{ color: "#ffd700", fontSize: 14 }}>
+                          {"★".repeat(result.player.starRating)}
                         </div>
                       </div>
-                    ))}
+                    </div>
+                    {/* Avatar */}
+                    <div
+                      style={{ width: 140, margin: "8px auto 4px" }}
+                      dangerouslySetInnerHTML={{
+                        __html: result.player.avatarSvg ?? "",
+                      }}
+                    />
+                    {/* Name bar */}
+                    <div
+                      style={{
+                        background: "rgba(0,0,0,0.4)",
+                        padding: "8px 12px",
+                        textAlign: "center",
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontFamily: "var(--display)",
+                          fontSize: "0.95rem",
+                          textTransform: "uppercase",
+                          letterSpacing: 1,
+                          color: "#fff",
+                        }}
+                      >
+                        {result.player.name}
+                      </div>
+                    </div>
+                    {/* Stats */}
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(4, 1fr)",
+                        gap: 0,
+                        borderTop: "1px solid rgba(255,255,255,0.1)",
+                      }}
+                    >
+                      {(
+                        [
+                          ["PAC", result.player.pace],
+                          ["SHO", result.player.shooting],
+                          ["PAS", result.player.passing],
+                          ["DEF", result.player.defending],
+                        ] as [string, number][]
+                      ).map(([l, v]) => (
+                        <div
+                          key={l}
+                          style={{
+                            padding: "8px 4px",
+                            textAlign: "center",
+                            borderRight: "1px solid rgba(255,255,255,0.08)",
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontFamily: "var(--mono)",
+                              fontSize: 16,
+                              fontWeight: 700,
+                              color: statColor(v),
+                            }}
+                          >
+                            {v}
+                          </div>
+                          <div
+                            style={{
+                              fontSize: 8,
+                              color: "rgba(255,255,255,0.4)",
+                              textTransform: "uppercase",
+                            }}
+                          >
+                            {l}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </>
+                  <div style={{ fontSize: 12, color: "var(--ink-dim)" }}>
+                    Added to your squad ✓
+                  </div>
+                  <style>{`
+                    @keyframes card-reveal {
+                      from { transform: rotateY(90deg) scale(0.8); opacity: 0; }
+                      to   { transform: rotateY(0deg) scale(1); opacity: 1; }
+                    }
+                  `}</style>
+                </div>
               ) : null}
             </div>
           )}
