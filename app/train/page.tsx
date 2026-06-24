@@ -104,6 +104,78 @@ function TrainContent() {
     setLoading(false);
   }
 
+  async function handleBoost(playerId: string) {
+    if (!walletAddress) return;
+    const BOOST_SOL = 0.01;
+    const TREASURY = process.env.NEXT_PUBLIC_SOLANA_TREASURY;
+    if (!TREASURY) {
+      alert("Treasury not configured");
+      return;
+    }
+
+    // Get wallet for signing
+    const phantom = (window as any).phantom?.solana ?? (window as any).solana;
+    const signer = phantom?.isPhantom ? phantom : null;
+    if (!signer) {
+      alert("Wallet not connected");
+      return;
+    }
+
+    setTraining(`boost-${playerId}`);
+    try {
+      const { Connection, PublicKey, Transaction, SystemProgram } =
+        await import("@solana/web3.js");
+      const connection = new Connection(
+        process.env.NEXT_PUBLIC_SOLANA_RPC_URL ??
+          "https://api.devnet.solana.com",
+        "confirmed",
+      );
+      const lamports = Math.round(BOOST_SOL * 1_000_000_000);
+
+      const tx = new Transaction().add(
+        SystemProgram.transfer({
+          fromPubkey: new PublicKey(walletAddress),
+          toPubkey: new PublicKey(TREASURY),
+          lamports,
+        }),
+      );
+      const { blockhash } = await connection.getLatestBlockhash();
+      tx.recentBlockhash = blockhash;
+      tx.feePayer = new PublicKey(walletAddress);
+
+      const { signature } = await signer.signAndSendTransaction(tx);
+
+      const res = await fetch("/api/train/boost", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          solanaWallet: walletAddress,
+          playerId,
+          txHash: signature,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setResult({
+          playerId,
+          stat: data.stat,
+          gain: data.gain,
+          newValue: data.newValue,
+        });
+        setPlayers((prev) =>
+          prev.map((p) =>
+            p.id === playerId ? { ...p, [data.stat]: data.newValue } : p,
+          ),
+        );
+      } else {
+        alert(data.error);
+      }
+    } catch (e: any) {
+      alert(e?.message ?? "Boost failed");
+    }
+    setTraining(null);
+  }
+
   async function handleTrain(playerId: string) {
     setTraining(playerId);
     setResult(null);
@@ -351,7 +423,8 @@ function TrainContent() {
             key={p.id}
             player={p}
             onTrain={() => handleTrain(p.id)}
-            training={training === p.id}
+            onBoost={() => handleBoost(p.id)}
+            training={training === p.id || training === `boost-${p.id}`}
             clubCanTrain={clubCanTrain}
           />
         ))}
@@ -363,11 +436,13 @@ function TrainContent() {
 function TrainingCard({
   player: p,
   onTrain,
+  onBoost,
   training,
   clubCanTrain,
 }: {
   player: TrainingPlayer;
   onTrain: () => void;
+  onBoost: () => void;
   training: boolean;
   clubCanTrain: boolean;
 }) {
@@ -467,7 +542,14 @@ function TrainingCard({
         ))}
       </div>
 
-      <div style={{ padding: "10px 14px" }}>
+      <div
+        style={{
+          padding: "10px 14px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 6,
+        }}
+      >
         {clubCanTrain ? (
           <button
             onClick={onTrain}
@@ -504,6 +586,27 @@ function TrainingCard({
             Club trained today
           </div>
         )}
+        {/* Boost button — always available, costs 0.01 SOL */}
+        <button
+          onClick={onBoost}
+          disabled={training}
+          style={{
+            width: "100%",
+            padding: "7px",
+            borderRadius: 6,
+            border: "1px solid rgba(153,69,255,0.4)",
+            background: "rgba(153,69,255,0.08)",
+            color: "#9945FF",
+            fontFamily: "var(--display)",
+            fontWeight: 700,
+            fontSize: 11,
+            textTransform: "uppercase",
+            letterSpacing: 1,
+            cursor: training ? "not-allowed" : "pointer",
+          }}
+        >
+          {training ? "..." : "⚡ Boost (0.01 SOL)"}
+        </button>
       </div>
     </div>
   );

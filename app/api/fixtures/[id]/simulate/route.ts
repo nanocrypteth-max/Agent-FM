@@ -230,6 +230,10 @@ async function awardMatchExp({
     const newLevel = levelFromExp(newExp);
     const leveledUp = newLevel > session.managerLevel;
 
+    // USD award: WIN=$500, DRAW=$200, LOSS=$50 (stored as cents)
+    const usdGainCents =
+      result === "WIN" ? 50000 : result === "DRAW" ? 20000 : 5000;
+
     updates.push(
       prisma.userSession.update({
         where: { id: session.id },
@@ -238,6 +242,7 @@ async function awardMatchExp({
           managerLevel: newLevel,
           totalMatches: { increment: 1 },
           ...(result === "WIN" ? { totalWins: { increment: 1 } } : {}),
+          usdBalance: { increment: usdGainCents },
         },
       }),
     );
@@ -247,10 +252,10 @@ async function awardMatchExp({
       prisma.portalMessage.create({
         data: {
           type: "EXP",
-          title: `Match Result: ${result} · +${gained} EXP`,
-          content: `${result === "WIN" ? "🏆 Victory!" : result === "DRAW" ? "🤝 Draw." : "❌ Defeat."} You earned ${gained} EXP. Manager Level ${newLevel}${leveledUp ? " 🎉 LEVEL UP!" : ""} · Total: ${newExp} EXP.`,
+          title: `Match Result: ${result} · +${gained} EXP · +$${(usdGainCents / 100).toLocaleString()}`,
+          content: `${result === "WIN" ? "🏆 Victory!" : result === "DRAW" ? "🤝 Draw." : "❌ Defeat."} You earned ${gained} EXP and $${(usdGainCents / 100).toLocaleString()}. Manager Level ${newLevel}${leveledUp ? " 🎉 LEVEL UP!" : ""} · Total: ${newExp} EXP.`,
           walletAddress: session.solanaWallet,
-          metadata: { gained, newExp, newLevel, leveledUp },
+          metadata: { gained, newExp, newLevel, leveledUp, usdGainCents },
         },
       }),
     );

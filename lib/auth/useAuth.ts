@@ -14,6 +14,7 @@ export interface UserSession {
   managerExp: number;
   totalWins: number;
   totalMatches: number;
+  usdBalance: number; // cents
   team: {
     id: string;
     name: string;

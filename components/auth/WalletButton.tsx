@@ -271,13 +271,36 @@ export default function WalletButton() {
                   background: "rgba(255,215,0,0.06)",
                   borderRadius: 6,
                   fontSize: 12,
+                  display: "flex",
+                  justifyContent: "space-between",
                 }}
               >
-                Budget:{" "}
+                <span style={{ color: "var(--ink-dim)" }}>Budget</span>
                 <span
                   style={{ color: "var(--ws-gold)", fontFamily: "var(--mono)" }}
                 >
                   £{(session?.team.budget ?? 0).toLocaleString()}
+                </span>
+              </div>
+              <div
+                style={{
+                  marginTop: 4,
+                  padding: "6px 10px",
+                  background: "rgba(46,204,113,0.06)",
+                  borderRadius: 6,
+                  fontSize: 12,
+                  display: "flex",
+                  justifyContent: "space-between",
+                }}
+              >
+                <span style={{ color: "var(--ink-dim)" }}>USD Balance</span>
+                <span
+                  style={{
+                    color: "var(--ws-green-bright)",
+                    fontFamily: "var(--mono)",
+                  }}
+                >
+                  ${((session?.usdBalance ?? 0) / 100).toLocaleString()}
                 </span>
               </div>
             </div>

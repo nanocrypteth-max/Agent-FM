@@ -118,7 +118,56 @@ function SquadContent() {
     setMsg(res.ok ? "✓ Formation saved!" : data.error);
   }
 
+  const [showPresets, setShowPresets] = useState(false);
+
   if (!team) return <Centered>Loading squad...</Centered>;
+
+  // Formation presets — common tactical templates
+  const PRESETS: Record<
+    string,
+    { formation: string; label: string; desc: string }
+  > = {
+    "Defensive Block": {
+      formation: "5-3-2",
+      label: "🛡️ Defensive Block",
+      desc: "5 defenders, compact shape",
+    },
+    "Attacking Blitz": {
+      formation: "4-3-3",
+      label: "⚔️ Attacking Blitz",
+      desc: "3 forwards, high press",
+    },
+    "Possession Game": {
+      formation: "4-2-3-1",
+      label: "🎯 Possession Game",
+      desc: "Double pivot, CAM link",
+    },
+    "Counter Attack": {
+      formation: "4-5-1",
+      label: "⚡ Counter Attack",
+      desc: "Compact midfield, lone striker",
+    },
+    "Total Football": {
+      formation: "3-5-2",
+      label: "🌀 Total Football",
+      desc: "Wing backs, fluid attack",
+    },
+    "Twin Strikers": {
+      formation: "4-4-2",
+      label: "👥 Twin Strikers",
+      desc: "Classic balanced shape",
+    },
+    "Second Striker": {
+      formation: "4-4-1-1",
+      label: "🎭 Second Striker",
+      desc: "SS behind lone striker",
+    },
+    "Diamond Attack": {
+      formation: "4-3-1-2",
+      label: "💎 Diamond Attack",
+      desc: "SS + 2 strikers, narrow",
+    },
+  };
 
   return (
     <div className="page">
@@ -170,6 +219,7 @@ function SquadContent() {
             flexWrap: "wrap",
           }}
         >
+          {/* Formation selector */}
           <select
             value={formation}
             onChange={(e) => {
@@ -191,7 +241,83 @@ function SquadContent() {
             ))}
           </select>
 
-          {/* Reset button — poin 2 */}
+          {/* Preset picker — poin 3 */}
+          <div style={{ position: "relative" }}>
+            <button
+              onClick={() => setShowPresets((s) => !s)}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 6,
+                border: "1px solid var(--border)",
+                background: "var(--panel-bg)",
+                color: "var(--ink)",
+                cursor: "pointer",
+                fontSize: 12,
+              }}
+            >
+              📋 Presets
+            </button>
+            {showPresets && (
+              <>
+                <div
+                  onClick={() => setShowPresets(false)}
+                  style={{ position: "fixed", inset: 0, zIndex: 10 }}
+                />
+                <div
+                  style={{
+                    position: "absolute",
+                    top: "calc(100% + 4px)",
+                    left: 0,
+                    zIndex: 20,
+                    background: "var(--panel-bg-2)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 8,
+                    padding: 8,
+                    minWidth: 220,
+                    boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
+                  }}
+                >
+                  {Object.entries(PRESETS).map(([name, preset]) => (
+                    <button
+                      key={name}
+                      onClick={() => {
+                        setFormation(preset.formation);
+                        setSlots(new Map());
+                        setSelectedPlayer(null);
+                        setShowPresets(false);
+                      }}
+                      style={{
+                        display: "block",
+                        width: "100%",
+                        padding: "8px 10px",
+                        textAlign: "left",
+                        background: "none",
+                        border: "none",
+                        cursor: "pointer",
+                        borderRadius: 6,
+                        color: "var(--ink)",
+                      }}
+                      onMouseEnter={(e) =>
+                        (e.currentTarget.style.background =
+                          "rgba(255,255,255,0.05)")
+                      }
+                      onMouseLeave={(e) =>
+                        (e.currentTarget.style.background = "none")
+                      }
+                    >
+                      <div style={{ fontSize: 12, fontWeight: 600 }}>
+                        {preset.label}
+                      </div>
+                      <div style={{ fontSize: 10, color: "var(--ink-dim)" }}>
+                        {preset.formation} · {preset.desc}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+
           <button
             onClick={resetFormation}
             disabled={slots.size === 0}
@@ -672,7 +798,7 @@ function PlayerCard({
               fontSize: 9,
             }}
           >
-            {player.position}
+            {posDisplay(player.position)}
           </span>
           {"★".repeat(player.starRating)}
           {"☆".repeat(5 - player.starRating)}
@@ -775,6 +901,17 @@ function posGroup(pos: string): string {
   if (pos === "DF") return "DF";
   if (pos === "MF") return "MF";
   return "FW";
+}
+
+// Display label for position in bench list — maps DB position to readable short form
+function posDisplay(pos: string): string {
+  const map: Record<string, string> = {
+    GK: "GK",
+    DF: "DEF",
+    MF: "MID",
+    FW: "FWD",
+  };
+  return map[pos] ?? pos;
 }
 
 function statColor(val: number): string {

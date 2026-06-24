@@ -168,11 +168,13 @@ model TransferListing {
   player       Player        @relation(fields: [playerId], references: [id])
   fromTeamId   String
   fromTeam     Team          @relation("SellingTeam", fields: [fromTeamId], references: [id])
-  sellerWallet String        // Solana wallet of seller
-  price        Int           // in-game currency (kept for AI market compat)
-  priceSOL     Float         @default(0)  // SOL price for P2P market
-  isSOLListing Boolean       @default(false) // true = user-to-user SOL trade
-  escrowTxHash String?       // SOL sent to treasury, tracked here
+  sellerWallet String
+  price        Int           // in-game currency cents (for AI market compat)
+  priceSOL     Float         @default(0)
+  priceUSD     Int           @default(0)   // USD cents: $5000 = 500000
+  isSOLListing Boolean       @default(false)
+  isUSDListing Boolean       @default(false) // true = USD in-game currency
+  escrowTxHash String?
   status       ListingStatus @default(LISTED)
   listedAt     DateTime      @default(now())
   soldAt       DateTime?
@@ -298,7 +300,7 @@ model UserSquad {
 model UserSession {
   id            String   @id @default(cuid())
   solanaWallet  String   @unique
-  privyUserId   String?  @unique // Privy DID (nullable for existing Phantom users)
+  privyUserId   String?  @unique
   teamId        String   @unique
   team          Team     @relation(fields: [teamId], references: [id])
   displayName   String?
@@ -308,6 +310,22 @@ model UserSession {
   managerExp    Int      @default(0)
   totalWins     Int      @default(0)
   totalMatches  Int      @default(0)
+  // In-game USD currency (stored as cents: $500.00 = 50000)
+  usdBalance    Int      @default(0)
   createdAt     DateTime @default(now())
   lastSeenAt    DateTime @default(now())
+}
+
+model BoostLog {
+  id          String   @id @default(cuid())
+  playerId    String
+  wallet      String
+  stat        String
+  gain        Int
+  txHash      String
+  solPaid     Float
+  createdAt   DateTime @default(now())
+
+  @@index([playerId])
+  @@index([wallet])
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import PitchView from "@/components/pitch/PitchView";
 import TacticsForm from "@/components/tactics/TacticsForm";
@@ -98,6 +98,9 @@ function MatchContent() {
   const [matchOver, setMatchOver] = useState(false);
   const [speed, setSpeed] = useState(1);
   const [goalFlash, setGoalFlash] = useState(0);
+  const [showHalfTimeModal, setShowHalfTimeModal] = useState(false);
+  const [halfTimeFormation, setHalfTimeFormation] = useState<string>("4-4-2");
+  const isUserInMatchRef = useRef(false);
   const [expPopup, setExpPopup] = useState<{
     result: "WIN" | "DRAW" | "LOSS";
     expGained: number;
@@ -226,10 +229,11 @@ function MatchContent() {
           );
           setGoalFlash((k) => k + 1);
         }
+
         if (ev.type === "FULL_TIME") {
           setMatchOver(true);
-          stopAmbience(); // end stadium crowd background loop
-          // Fetch updated session to get EXP gained
+          stopAmbience();
+          // Fetch updated session for EXP popup after a short delay
           setTimeout(async () => {
             try {
               const sessionRes = await fetch(`/api/fixtures/${fixtureId}`);
@@ -251,7 +255,6 @@ function MatchContent() {
                     ? "DRAW"
                     : "LOSS";
 
-              // Fetch latest session for updated EXP
               const walletRes = await fetch(
                 "/api/auth?" +
                   new URLSearchParams({
@@ -269,7 +272,6 @@ function MatchContent() {
                         ? 20
                         : 10;
 
-                  // Find MVP from match result
                   const mvpEvent = sessionData.matchResult?.events
                     ?.filter((e: any) => e.playerId)
                     ?.reduce((best: any, e: any) => {
@@ -289,13 +291,18 @@ function MatchContent() {
                     expGained,
                     newExp: s.managerExp,
                     newLevel: s.managerLevel,
-                    leveledUp: false, // shown via portal message
+                    leveledUp: false,
                     mvpName: mvpEvent?.playerName ?? null,
                   });
                 }
               }
             } catch {}
-          }, 1800); // delay so PitchView finishes first
+          }, 1800);
+        }
+
+        // Half-time modal — separate from FULL_TIME block to avoid type narrowing error
+        if (ev.type === "HALF_TIME" && isUserInMatchRef.current) {
+          setShowHalfTimeModal(true);
         }
 
         const soundKey = eventToSound(ev.type);
@@ -314,6 +321,8 @@ function MatchContent() {
     : data.awayTeam.isUserControlled
       ? data.awayTeam
       : null;
+  // Keep ref updated so the event handler can check without stale closure
+  isUserInMatchRef.current = !!userTeam;
 
   // ---- PRE-MATCH ----
   if (!data.simulated) {
@@ -659,6 +668,18 @@ function MatchContent() {
       </div>
 
       {/* EXP Popup */}
+      {/* Half-time formation change modal — poin 5 */}
+      {showHalfTimeModal && (
+        <HalfTimeModal
+          currentFormation={halfTimeFormation}
+          onConfirm={(formation) => {
+            setHalfTimeFormation(formation);
+            setShowHalfTimeModal(false);
+          }}
+          onSkip={() => setShowHalfTimeModal(false)}
+        />
+      )}
+
       {expPopup && (
         <ExpResultPopup
           {...expPopup}
@@ -939,6 +960,187 @@ function Centered({ children }: { children: React.ReactNode }) {
     >
       {children}
     </div>
+  );
+}
+
+// ─── Half-Time Formation Modal ────────────────────────────────────────────────
+
+const FORMATION_LIST = [
+  "4-4-2",
+  "4-3-3",
+  "4-2-3-1",
+  "3-5-2",
+  "5-3-2",
+  "4-5-1",
+  "4-4-1-1",
+  "4-3-1-2",
+] as const;
+
+function HalfTimeModal({
+  currentFormation,
+  onConfirm,
+  onSkip,
+}: {
+  currentFormation: string;
+  onConfirm: (formation: string) => void;
+  onSkip: () => void;
+}) {
+  const [selected, setSelected] = useState(currentFormation);
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setVisible(true), 50);
+    return () => clearTimeout(t);
+  }, []);
+
+  return (
+    <>
+      <div
+        onClick={onSkip}
+        style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 300,
+          background: "rgba(0,0,0,0.7)",
+          backdropFilter: "blur(4px)",
+          opacity: visible ? 1 : 0,
+          transition: "opacity 0.25s",
+        }}
+      />
+      <div
+        style={{
+          position: "fixed",
+          top: "50%",
+          left: "50%",
+          transform: visible
+            ? "translate(-50%,-50%) scale(1)"
+            : "translate(-50%,-50%) scale(0.9)",
+          zIndex: 301,
+          width: "min(420px, 90vw)",
+          background: "linear-gradient(160deg, #0d1117, #0a0d12)",
+          border: "1px solid rgba(79,195,247,0.3)",
+          borderRadius: 14,
+          overflow: "hidden",
+          boxShadow:
+            "0 0 40px rgba(79,195,247,0.15), 0 20px 50px rgba(0,0,0,0.6)",
+          opacity: visible ? 1 : 0,
+          transition: "all 0.3s cubic-bezier(0.34,1.56,0.64,1)",
+        }}
+      >
+        <div
+          style={{
+            height: 3,
+            background:
+              "linear-gradient(90deg, transparent, #4fc3f7, transparent)",
+          }}
+        />
+        <div style={{ padding: "24px 22px" }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              marginBottom: 16,
+            }}
+          >
+            <span style={{ fontSize: 28 }}>⏱</span>
+            <div>
+              <div
+                style={{
+                  fontFamily: "var(--display)",
+                  fontSize: "1.2rem",
+                  textTransform: "uppercase",
+                  letterSpacing: 1,
+                  color: "#4fc3f7",
+                }}
+              >
+                Half Time
+              </div>
+              <div style={{ fontSize: 11, color: "var(--ink-dim)" }}>
+                Adjust your formation for the second half
+              </div>
+            </div>
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: 8,
+              marginBottom: 18,
+            }}
+          >
+            {FORMATION_LIST.map((f) => (
+              <button
+                key={f}
+                onClick={() => setSelected(f)}
+                style={{
+                  padding: "10px",
+                  borderRadius: 8,
+                  cursor: "pointer",
+                  background:
+                    selected === f
+                      ? "rgba(79,195,247,0.15)"
+                      : "var(--panel-bg)",
+                  border:
+                    selected === f
+                      ? "1px solid rgba(79,195,247,0.6)"
+                      : "1px solid var(--border)",
+                  color: selected === f ? "#4fc3f7" : "var(--ink)",
+                  fontFamily: "var(--mono)",
+                  fontSize: 14,
+                  fontWeight: selected === f ? 700 : 400,
+                  transition: "all 0.12s",
+                }}
+              >
+                {f}
+              </button>
+            ))}
+          </div>
+
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              onClick={onSkip}
+              style={{
+                flex: 1,
+                padding: "11px",
+                borderRadius: 8,
+                border: "1px solid var(--border)",
+                background: "transparent",
+                color: "var(--ink-dim)",
+                cursor: "pointer",
+                fontFamily: "var(--display)",
+                fontSize: 12,
+                textTransform: "uppercase",
+              }}
+            >
+              Keep Current
+            </button>
+            <button
+              onClick={() => {
+                setVisible(false);
+                setTimeout(() => onConfirm(selected), 250);
+              }}
+              style={{
+                flex: 2,
+                padding: "11px",
+                borderRadius: 8,
+                border: "none",
+                background: "#4fc3f7",
+                color: "#0a0d12",
+                cursor: "pointer",
+                fontFamily: "var(--display)",
+                fontWeight: 700,
+                fontSize: 12,
+                textTransform: "uppercase",
+                letterSpacing: 1,
+              }}
+            >
+              ✓ Apply {selected}
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
   );
 }
 
