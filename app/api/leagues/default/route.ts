@@ -56,7 +56,8 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // Lazy progression: if all fixtures done, trigger next season
+  // Lazy progression: if all fixtures done, trigger next season inline
+  // (awaited so Vercel doesn't kill the request before the cron fires)
   const total = league.fixtures.length;
   const simulated = league.fixtures.filter(
     (f) => f.status === "SIMULATED",
@@ -67,10 +68,14 @@ export async function GET(req: NextRequest) {
     const host = req.headers.get("host") ?? "localhost:3000";
     const protocol = host.includes("localhost") ? "http" : "https";
 
-    fetch(`${protocol}://${host}/api/cron/check-league`, {
-      method: "GET",
-      headers: { authorization: `Bearer ${cronSecret}` },
-    }).catch(() => {});
+    try {
+      await fetch(`${protocol}://${host}/api/cron/check-league`, {
+        method: "GET",
+        headers: { authorization: `Bearer ${cronSecret}` },
+      });
+    } catch {
+      // non-fatal — will retry on next page load
+    }
   }
 
   return NextResponse.json(league);

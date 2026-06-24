@@ -132,12 +132,32 @@ export async function GET(req: NextRequest) {
     );
     await prisma.fixture.createMany({ data: fixtures });
 
+    // Find user wallet for portal notification
+    const userSession = userTeam
+      ? await prisma.userSession.findFirst({
+          where: {
+            teamId: {
+              in: [
+                userTeam.id,
+                ...(
+                  await prisma.team.findMany({
+                    where: { leagueId: newLeague.id, isUserControlled: true },
+                    select: { id: true },
+                  })
+                ).map((t) => t.id),
+              ],
+            },
+          },
+        })
+      : null;
+
     // Portal notification
     await prisma.portalMessage.create({
       data: {
         type: "LEAGUE",
-        title: `Season ${newLeague.season} Begins!`,
-        content: `A new season of ${newLeague.name} has started. The ${newLeague.trophyName} is up for grabs. ${fixtures.length} fixtures scheduled.`,
+        title: `🏆 Season ${newLeague.season} Begins!`,
+        content: `A new season of ${newLeague.name} has started. The ${newLeague.trophyName} is up for grabs. ${fixtures.length} fixtures scheduled. Your squad has been carried over — players aged +1 year.`,
+        walletAddress: userSession?.solanaWallet ?? null,
         metadata: { leagueId: newLeague.id, season: newLeague.season },
       },
     });
