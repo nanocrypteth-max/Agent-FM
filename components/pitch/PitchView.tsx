@@ -86,11 +86,10 @@ export default function PitchView({
       });
     });
     playersRef.current = map;
-    // Reset event playback so events are re-consumed now that players are initialized.
-    // This handles the case (friendly match) where events arrive before startingXI.
-    if (homeStartingXI.length > 0) {
-      setEventIndex(0);
-    }
+    // Reset event playback only if events have already arrived (friendly match case
+    // where startingXI arrives after some events due to Pusher ordering).
+    // Don't reset if no events yet — avoids unnecessary re-render on league match init.
+    setEventIndex(0);
   }, [homeStartingXI, awayStartingXI, homeFormationSlots, awayFormationSlots]);
 
   useEffect(() => {

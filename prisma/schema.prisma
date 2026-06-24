@@ -24,8 +24,18 @@ model League {
 }
 
 enum LeagueStatus {
+  WAITING    // waiting for more players to fill league
   ACTIVE
   COMPLETED
+}
+
+model MatchmakingQueue {
+  id           String   @id @default(cuid())
+  walletAddress String  @unique
+  joinedAt     DateTime @default(now())
+  leagueId     String?  // set once league is created
+
+  @@index([leagueId])
 }
 
 model Team {

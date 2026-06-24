@@ -10,6 +10,7 @@ import { APP_TAGLINE } from "@/lib/config";
 
 const NAV_ITEMS = [
   { href: "/", label: "League", icon: "🏆" },
+  { href: "/matchmaking", label: "Find League", icon: "🔍" },
   { href: "/squad", label: "Squad", icon: "⚽" },
   { href: "/train", label: "Train", icon: "💪" },
   { href: "/market", label: "Market", icon: "💰" },

@@ -131,12 +131,31 @@ function FriendlyRoom() {
       .then((d) => {
         const players = d.players ?? [];
         setMyPlayers(players);
-        // Pre-populate slotMap from saved squad
+        // Pre-fill formation slots from saved squad (slotIndex from DB)
         const map = new Map<number, string>();
         players.forEach((p: SquadPlayer) => {
-          if (p.slotIndex !== null) map.set(p.slotIndex, p.id);
+          if (p.slotIndex !== null && p.slotIndex !== undefined) {
+            map.set(p.slotIndex, p.id);
+          }
         });
-        setSlotMap(map);
+        // If user has saved a formation, use it; else auto-assign top 11 by rating
+        if (map.size >= 11) {
+          setSlotMap(map);
+        } else {
+          // Auto-assign: GK first, then by position group order
+          const autoMap = new Map<number, string>();
+          const sorted = [...players].sort((a, b) => {
+            const order: Record<string, number> = {
+              GK: 0,
+              DF: 1,
+              MF: 2,
+              FW: 3,
+            };
+            return (order[a.position] ?? 2) - (order[b.position] ?? 2);
+          });
+          sorted.slice(0, 11).forEach((p, i) => autoMap.set(i, p.id));
+          setSlotMap(autoMap);
+        }
       })
       .catch(() => {});
   }, [walletAddress]);
@@ -192,21 +211,21 @@ function FriendlyRoom() {
         }
       });
 
-      // match-start comes from /simulate route with startingXI — initialize PitchView players
+      // lineup-data: init PitchView players (sent BEFORE match-start)
       channel.bind(
-        "match-start",
-        (data: {
-          friendlyId: string;
-          homeStartingXI?: string[];
-          awayStartingXI?: string[];
-        }) => {
-          setSimulating(true);
+        "lineup-data",
+        (data: { homeStartingXI: string[]; awayStartingXI: string[] }) => {
           if (data.homeStartingXI?.length)
             setHomeStartingXI(data.homeStartingXI);
           if (data.awayStartingXI?.length)
             setAwayStartingXI(data.awayStartingXI);
         },
       );
+
+      // match-start: show pitch UI (sent AFTER lineup-data)
+      channel.bind("match-start", (_data: { friendlyId: string }) => {
+        setSimulating(true);
+      });
 
       channel.bind("match-event", (data: { events: MatchEvent[] }) => {
         setEvents((prev) => [...prev, ...data.events]);

@@ -8,7 +8,10 @@ export const runtime = "nodejs";
 /** Generate a unique 6-char uppercase lobby code */
 function generateCode(): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  return Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
+  return Array.from(
+    { length: 6 },
+    () => chars[Math.floor(Math.random() * chars.length)],
+  ).join("");
 }
 
 /**
@@ -17,10 +20,17 @@ function generateCode(): string {
  */
 export async function POST(req: NextRequest) {
   const { solanaWallet } = await req.json();
-  if (!solanaWallet) return NextResponse.json({ error: "solanaWallet required" }, { status: 400 });
+  if (!solanaWallet)
+    return NextResponse.json(
+      { error: "solanaWallet required" },
+      { status: 400 },
+    );
 
-  const session = await prisma.userSession.findUnique({ where: { solanaWallet } });
-  if (!session) return NextResponse.json({ error: "Session not found" }, { status: 404 });
+  const session = await prisma.userSession.findUnique({
+    where: { solanaWallet },
+  });
+  if (!session)
+    return NextResponse.json({ error: "Session not found" }, { status: 404 });
 
   // Cancel any existing open lobbies from this user
   await prisma.friendlyMatch.updateMany({
@@ -38,7 +48,7 @@ export async function POST(req: NextRequest) {
     attempts++;
   }
 
-  const expiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 min
+  const expiresAt = new Date(Date.now() + 1 * 60 * 1000); // 1 minute
 
   const lobby = await prisma.friendlyMatch.create({
     data: {
@@ -60,6 +70,12 @@ export async function POST(req: NextRequest) {
  * GET /api/friendly — List open lobbies (excluding expired)
  */
 export async function GET() {
+  // Auto-clean expired lobbies first
+  await prisma.friendlyMatch.updateMany({
+    where: { status: "WAITING", expiresAt: { lt: new Date() } },
+    data: { status: "EXPIRED" },
+  });
+
   const lobbies = await prisma.friendlyMatch.findMany({
     where: {
       status: "WAITING",

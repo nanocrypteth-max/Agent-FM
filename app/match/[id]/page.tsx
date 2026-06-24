@@ -126,6 +126,15 @@ function MatchContent() {
       if (!res.ok) throw new Error(json.error ?? "Failed to load fixture");
       setData(json);
 
+      // For already-simulated matches: pre-populate state so PitchView
+      // plays through once and stops (paused=matchOver prevents infinite replay).
+      if (json.simulated && json.events?.length > 0) {
+        setLiveScore({ home: json.homeScore ?? 0, away: json.awayScore ?? 0 });
+        setFeed([...json.events].reverse());
+        // matchOver starts false so PitchView can animate through events once
+        // It will be set true when FULL_TIME event is processed
+      }
+
       if (!json.simulated) {
         const userTeam = json.homeTeam.isUserControlled
           ? json.homeTeam
@@ -586,6 +595,7 @@ function MatchContent() {
             awayFormationSlots={awaySlots}
             speed={speed}
             onMinuteChange={handleMinuteChange}
+            paused={matchOver}
           />
         </div>
 
