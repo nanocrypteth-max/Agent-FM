@@ -53,7 +53,11 @@ export default function PitchView({
 
   const [eventIndex, setEventIndex] = useState(0);
   const playersRef = useRef<Map<string, PlayerState>>(new Map());
-  const ballRef = useRef<{ current: Position2D; target: Position2D; transitionStart: number }>({
+  const ballRef = useRef<{
+    current: Position2D;
+    target: Position2D;
+    transitionStart: number;
+  }>({
     current: { x: 50, y: 50 },
     target: { x: 50, y: 50 },
     transitionStart: performance.now(),
@@ -63,13 +67,30 @@ export default function PitchView({
     const map = new Map<string, PlayerState>();
     homeStartingXI.forEach((id, i) => {
       const pos = homeFormationSlots[i] ?? { x: 50, y: 50 };
-      map.set(id, { id, team: "HOME", current: pos, target: pos, transitionStart: performance.now() });
+      map.set(id, {
+        id,
+        team: "HOME",
+        current: pos,
+        target: pos,
+        transitionStart: performance.now(),
+      });
     });
     awayStartingXI.forEach((id, i) => {
       const pos = awayFormationSlots[i] ?? { x: 50, y: 50 };
-      map.set(id, { id, team: "AWAY", current: pos, target: pos, transitionStart: performance.now() });
+      map.set(id, {
+        id,
+        team: "AWAY",
+        current: pos,
+        target: pos,
+        transitionStart: performance.now(),
+      });
     });
     playersRef.current = map;
+    // Reset event playback so events are re-consumed now that players are initialized.
+    // This handles the case (friendly match) where events arrive before startingXI.
+    if (homeStartingXI.length > 0) {
+      setEventIndex(0);
+    }
   }, [homeStartingXI, awayStartingXI, homeFormationSlots, awayFormationSlots]);
 
   useEffect(() => {
@@ -80,14 +101,19 @@ export default function PitchView({
     const prevEvent = events[eventIndex - 1];
 
     const minuteGap = prevEvent ? event.minute - prevEvent.minute : 0;
-    const delayMs = Math.min(MAX_DELAY_MS, Math.max(80, (minuteGap * 800) / speed));
+    const delayMs = Math.min(
+      MAX_DELAY_MS,
+      Math.max(80, (minuteGap * 800) / speed),
+    );
 
     const timer = setTimeout(() => {
       applyEvent(event);
       setEventIndex((i) => i + 1);
 
       if (!prevEvent || event.minute !== prevEvent.minute) {
-        const eventsThisMinute = events.filter((e) => e.minute === event.minute);
+        const eventsThisMinute = events.filter(
+          (e) => e.minute === event.minute,
+        );
         onMinuteChange?.(event.minute, eventsThisMinute);
       }
     }, delayMs);
@@ -116,7 +142,11 @@ export default function PitchView({
       }
     }
 
-    if (event.type === "GOAL" || event.type === "HALF_TIME" || event.type === "KICK_OFF") {
+    if (
+      event.type === "GOAL" ||
+      event.type === "HALF_TIME" ||
+      event.type === "KICK_OFF"
+    ) {
       resetToFormation(now);
     }
   }, []);
@@ -125,14 +155,30 @@ export default function PitchView({
     homeStartingXI.forEach((id, i) => {
       const pos = homeFormationSlots[i] ?? { x: 50, y: 50 };
       const p = playersRef.current.get(id);
-      if (p) playersRef.current.set(id, { ...p, current: p.target, target: pos, transitionStart: now });
+      if (p)
+        playersRef.current.set(id, {
+          ...p,
+          current: p.target,
+          target: pos,
+          transitionStart: now,
+        });
     });
     awayStartingXI.forEach((id, i) => {
       const pos = awayFormationSlots[i] ?? { x: 50, y: 50 };
       const p = playersRef.current.get(id);
-      if (p) playersRef.current.set(id, { ...p, current: p.target, target: pos, transitionStart: now });
+      if (p)
+        playersRef.current.set(id, {
+          ...p,
+          current: p.target,
+          target: pos,
+          transitionStart: now,
+        });
     });
-    ballRef.current = { current: ballRef.current.target, target: { x: 50, y: 50 }, transitionStart: now };
+    ballRef.current = {
+      current: ballRef.current.target,
+      target: { x: 50, y: 50 },
+      transitionStart: now,
+    };
   };
 
   useEffect(() => {
@@ -150,12 +196,29 @@ export default function PitchView({
       drawPitch(ctx, width, height);
 
       for (const player of playersRef.current.values()) {
-        const pos = interpolate(player.current, player.target, player.transitionStart, now);
-        drawCircle(ctx, pos, width, height, PLAYER_RADIUS_PCT, player.team === "HOME" ? COLORS.home : COLORS.away, true);
+        const pos = interpolate(
+          player.current,
+          player.target,
+          player.transitionStart,
+          now,
+        );
+        drawPlayer(
+          ctx,
+          pos,
+          width,
+          height,
+          PLAYER_RADIUS_PCT,
+          player.team === "HOME" ? COLORS.home : COLORS.away,
+        );
       }
 
-      const ballPos = interpolate(ballRef.current.current, ballRef.current.target, ballRef.current.transitionStart, now);
-      drawCircle(ctx, ballPos, width, height, BALL_RADIUS_PCT, COLORS.ball, false);
+      const ballPos = interpolate(
+        ballRef.current.current,
+        ballRef.current.target,
+        ballRef.current.transitionStart,
+        now,
+      );
+      drawBall(ctx, ballPos, width, height, BALL_RADIUS_PCT);
 
       animFrameRef.current = requestAnimationFrame(draw);
     };
@@ -178,7 +241,10 @@ export default function PitchView({
 
   return (
     <div ref={containerRef} style={{ width: "100%" }}>
-      <canvas ref={canvasRef} style={{ width: "100%", display: "block", borderRadius: 6 }} />
+      <canvas
+        ref={canvasRef}
+        style={{ width: "100%", display: "block", borderRadius: 6 }}
+      />
     </div>
   );
 }
@@ -217,14 +283,13 @@ function drawPitch(ctx: CanvasRenderingContext2D, w: number, h: number) {
   ctx.strokeRect(w - m - sixW, (h - sixH) / 2, sixW, sixH);
 }
 
-function drawCircle(
+function drawPlayer(
   ctx: CanvasRenderingContext2D,
   pos: Position2D,
   w: number,
   h: number,
   radiusPct: number,
   color: string,
-  withBorder: boolean
 ) {
   const x = (pos.x / 100) * w;
   const y = (pos.y / 100) * h;
@@ -234,19 +299,73 @@ function drawCircle(
   ctx.arc(x, y, r, 0, Math.PI * 2);
   ctx.fillStyle = color;
   ctx.fill();
-
-  if (withBorder) {
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = "#ffffff";
-    ctx.stroke();
-  } else {
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = "#333333";
-    ctx.stroke();
-  }
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "#ffffff";
+  ctx.stroke();
 }
 
-function interpolate(from: Position2D, to: Position2D, startTime: number, now: number): Position2D {
+function drawBall(
+  ctx: CanvasRenderingContext2D,
+  pos: Position2D,
+  w: number,
+  h: number,
+  radiusPct: number,
+) {
+  const x = (pos.x / 100) * w;
+  const y = (pos.y / 100) * h;
+  const r = radiusPct * w;
+
+  // White circle base
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fillStyle = "#ffffff";
+  ctx.fill();
+  ctx.lineWidth = 0.8;
+  ctx.strokeStyle = "#222";
+  ctx.stroke();
+
+  // Central pentagon patch
+  ctx.beginPath();
+  for (let i = 0; i < 5; i++) {
+    const angle = (Math.PI * 2 * i) / 5 - Math.PI / 2;
+    const px = x + r * 0.42 * Math.cos(angle);
+    const py = y + r * 0.42 * Math.sin(angle);
+    i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+  ctx.fillStyle = "#111";
+  ctx.fill();
+
+  // 5 outer hexagon patches
+  for (let i = 0; i < 5; i++) {
+    const angle = (Math.PI * 2 * i) / 5 - Math.PI / 2;
+    const px = x + r * 0.72 * Math.cos(angle);
+    const py = y + r * 0.72 * Math.sin(angle);
+    ctx.beginPath();
+    for (let j = 0; j < 5; j++) {
+      const a2 = angle + (Math.PI * 2 * j) / 5;
+      const hx = px + r * 0.28 * Math.cos(a2);
+      const hy = py + r * 0.28 * Math.sin(a2);
+      j === 0 ? ctx.moveTo(hx, hy) : ctx.lineTo(hx, hy);
+    }
+    ctx.closePath();
+    ctx.fillStyle = "#111";
+    ctx.fill();
+  }
+
+  // Shine highlight
+  ctx.beginPath();
+  ctx.arc(x - r * 0.28, y - r * 0.28, r * 0.22, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(255,255,255,0.55)";
+  ctx.fill();
+}
+
+function interpolate(
+  from: Position2D,
+  to: Position2D,
+  startTime: number,
+  now: number,
+): Position2D {
   const elapsed = now - startTime;
   const t = Math.min(1, elapsed / TRANSITION_DURATION_MS);
   const eased = 1 - Math.pow(1 - t, 3);

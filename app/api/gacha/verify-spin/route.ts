@@ -8,9 +8,11 @@ import { generateClubLogo } from "@/lib/svg/generateLogo";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 const Schema = z.object({
-  txHash: z.string().regex(/^0x[a-fA-F0-9]{64}$/),
+  // Solana txHash: base58, 86-88 chars
+  txHash: z.string().min(80).max(100),
   tier: z.enum(["STANDARD", "PREMIUM"]),
-  walletAddr: z.string().regex(/^0x[a-fA-F0-9]{40}$/),
+  // Solana wallet: base58, 32-44 chars
+  walletAddr: z.string().min(32).max(50),
 });
 
 const POSITION_LIST = ["GK", "DF", "MF", "FW"] as const;
@@ -75,14 +77,23 @@ export async function POST(req: NextRequest) {
   // TODO: In production, verify tx on-chain via provider.getTransactionReceipt()
   // For now, trust the client (acceptable for testnet MVP)
 
-  const userTeam = await prisma.team.findFirst({
-    where: { isUserControlled: true },
+  // Multi-user: look up team via wallet session
+  const session = await prisma.userSession.findUnique({
+    where: { solanaWallet: walletAddr },
+  });
+  if (!session)
+    return NextResponse.json({ error: "Session not found" }, { status: 400 });
+  const userTeam = await prisma.team.findUnique({
+    where: { id: session.teamId },
   });
   if (!userTeam)
     return NextResponse.json({ error: "User team not found" }, { status: 400 });
 
-  // Generate star rating for tier
-  const seed = parseInt(txHash.slice(2, 10), 16);
+  // Seed from first 8 chars of txHash (base58 — just use char codes)
+  const seed = txHash
+    .slice(0, 8)
+    .split("")
+    .reduce((acc, c) => acc + c.charCodeAt(0), 0);
   const rng = mulberry32(seed);
 
   let starRating: number;
@@ -99,7 +110,7 @@ export async function POST(req: NextRequest) {
   // Generate unique player
   const firstName = FIRST_NAMES[Math.floor(rng() * FIRST_NAMES.length)];
   const lastName = LAST_NAMES[Math.floor(rng() * LAST_NAMES.length)];
-  const name = `${firstName} ${lastName} G${txHash.slice(2, 6).toUpperCase()}`;
+  const name = `${firstName} ${lastName} ${txHash.slice(0, 4).toUpperCase()}`;
   const position = POSITION_LIST[Math.floor(rng() * POSITION_LIST.length)];
 
   const baseAttr = 40 + starRating * 10;
@@ -176,6 +187,7 @@ export async function POST(req: NextRequest) {
         type: "GACHA",
         title: `🎰 Gacha Result: ${starRating}★ Player Acquired!`,
         content: `You spun a ${tier} capsule and received ${name} (${position}, ★${starRating})! The player has been added to your squad.`,
+        walletAddress: walletAddr,
         metadata: { playerId: player.id, starRating, tier, txHash },
       },
     });

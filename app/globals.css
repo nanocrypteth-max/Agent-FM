@@ -395,20 +395,15 @@ select:focus {
 .ws-leader-row {
   background: linear-gradient(
     90deg,
-    rgba(255, 215, 0, 0.08),
+    rgba(255, 215, 0, 0.1),
     transparent
   ) !important;
-  position: relative;
+  box-shadow: inset 3px 0 0 var(--ws-gold);
 }
 
+/* Remove the absolute pseudo-element — doesn't work reliably in <tr> */
 .ws-leader-row::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 3px;
-  background: var(--ws-gold);
+  display: none;
 }
 
 /* Fixture row hover glow */

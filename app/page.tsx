@@ -226,22 +226,33 @@ export default function HomePage() {
             <table
               style={{
                 fontSize: 12.5,
-                minWidth: 320,
-                whiteSpace: "nowrap",
                 width: "100%",
                 tableLayout: "fixed",
+                borderCollapse: "collapse",
               }}
             >
               <thead>
                 <tr style={{ background: "var(--panel-bg)" }}>
-                  <th style={{ ...thStyle("left", true), width: 28 }}>#</th>
-                  <th style={{ ...thStyle("left") }}>Team</th>
-                  <th style={thStyle()}>P</th>
-                  <th style={thStyle()}>W</th>
-                  <th style={thStyle()}>D</th>
-                  <th style={thStyle()}>L</th>
-                  <th style={thStyle()}>GD</th>
-                  <th style={thStyle(undefined, true)}>Pts</th>
+                  <th
+                    style={{
+                      ...thStyle("left", true),
+                      width: 28,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    #
+                  </th>
+                  <th style={{ ...thStyle("left"), overflow: "hidden" }}>
+                    Team
+                  </th>
+                  <th style={{ ...thStyle(), width: 28 }}>P</th>
+                  <th style={{ ...thStyle(), width: 28 }}>W</th>
+                  <th style={{ ...thStyle(), width: 28 }}>D</th>
+                  <th style={{ ...thStyle(), width: 28 }}>L</th>
+                  <th style={{ ...thStyle(), width: 36 }}>GD</th>
+                  <th style={{ ...thStyle(undefined, true), width: 36 }}>
+                    Pts
+                  </th>
                 </tr>
               </thead>
               <tbody>
