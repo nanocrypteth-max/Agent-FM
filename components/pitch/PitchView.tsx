@@ -63,7 +63,14 @@ export default function PitchView({
     transitionStart: performance.now(),
   });
 
+  // Track previous startingXI to avoid spurious resets when parent re-renders
+  const prevStartingXIRef = useRef<string>("");
+
   useEffect(() => {
+    const key = JSON.stringify([homeStartingXI, awayStartingXI]);
+    const changed = key !== prevStartingXIRef.current;
+    prevStartingXIRef.current = key;
+
     const map = new Map<string, PlayerState>();
     homeStartingXI.forEach((id, i) => {
       const pos = homeFormationSlots[i] ?? { x: 50, y: 50 };
@@ -86,10 +93,13 @@ export default function PitchView({
       });
     });
     playersRef.current = map;
-    // Reset event playback only if events have already arrived (friendly match case
-    // where startingXI arrives after some events due to Pusher ordering).
-    // Don't reset if no events yet — avoids unnecessary re-render on league match init.
-    setEventIndex(0);
+
+    // Only reset event playback when startingXI actually changes content.
+    // This prevents resetting on every parent re-render which causes the
+    // "looping KICK_OFF" bug where eventIndex resets to 0 mid-playback.
+    if (changed && homeStartingXI.length > 0) {
+      setEventIndex(0);
+    }
   }, [homeStartingXI, awayStartingXI, homeFormationSlots, awayFormationSlots]);
 
   useEffect(() => {

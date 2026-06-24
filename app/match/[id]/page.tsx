@@ -126,13 +126,15 @@ function MatchContent() {
       if (!res.ok) throw new Error(json.error ?? "Failed to load fixture");
       setData(json);
 
-      // For already-simulated matches: pre-populate state so PitchView
-      // plays through once and stops (paused=matchOver prevents infinite replay).
+      // For already-simulated matches: show results immediately, no animation replay.
+      // Setting matchOver=true causes PitchView paused=true so it never starts consuming events.
+      // The feed is pre-built from stored events so commentary shows correctly without looping.
       if (json.simulated && json.events?.length > 0) {
         setLiveScore({ home: json.homeScore ?? 0, away: json.awayScore ?? 0 });
-        setFeed([...json.events].reverse());
-        // matchOver starts false so PitchView can animate through events once
-        // It will be set true when FULL_TIME event is processed
+        setLiveMinute(90);
+        setMatchOver(true); // immediately paused — no replay loop
+        // Feed: reverse so newest events at top of commentary
+        setFeed((json.events as MatchEvent[]).slice().reverse());
       }
 
       if (!json.simulated) {
@@ -225,11 +227,12 @@ function MatchContent() {
   }
 
   const handleMinuteChange = useCallback(
-    (minute: number, events: MatchEvent[]) => {
+    (minute: number, eventsThisMinute: MatchEvent[]) => {
       setLiveMinute(minute);
-      setFeed((prev) => [...events.slice().reverse(), ...prev]);
+      // Add this minute's events to commentary feed (newest at top)
+      setFeed((prev) => [...eventsThisMinute.slice().reverse(), ...prev]);
 
-      for (const ev of events) {
+      for (const ev of eventsThisMinute) {
         if (ev.type === "GOAL") {
           setLiveScore((s) =>
             ev.team === "HOME"
@@ -238,91 +241,61 @@ function MatchContent() {
           );
           setGoalFlash((k) => k + 1);
         }
-
+        if (ev.type === "HALF_TIME" && isUserInMatchRef.current) {
+          setShowHalfTimeModal(true);
+        }
         if (ev.type === "FULL_TIME") {
           setMatchOver(true);
           stopAmbience();
-          // Fetch updated session for EXP popup after a short delay
+          // Fetch fixture for EXP popup
           setTimeout(async () => {
             try {
-              const sessionRes = await fetch(`/api/fixtures/${fixtureId}`);
-              const sessionData = await sessionRes.json();
-              if (!sessionRes.ok) return;
-
-              const homeScore = sessionData.homeScore ?? 0;
-              const awayScore = sessionData.awayScore ?? 0;
-              const isHome = sessionData.homeTeam?.isUserControlled;
-              const isAway = sessionData.awayTeam?.isUserControlled;
-              if (!isHome && !isAway) return;
-
-              const userScore = isHome ? homeScore : awayScore;
-              const oppScore = isHome ? awayScore : homeScore;
+              const res = await fetch(`/api/fixtures/${fixtureId}`);
+              const d = await res.json();
+              if (!res.ok || !d.simulated) return;
+              const isHome = d.homeTeam?.isUserControlled;
+              if (!isHome && !d.awayTeam?.isUserControlled) return;
+              const myScore = isHome ? d.homeScore : d.awayScore;
+              const oppScore = isHome ? d.awayScore : d.homeScore;
               const result: "WIN" | "DRAW" | "LOSS" =
-                userScore > oppScore
+                myScore > oppScore
                   ? "WIN"
-                  : userScore === oppScore
-                    ? "DRAW"
-                    : "LOSS";
-
+                  : myScore < oppScore
+                    ? "LOSS"
+                    : "DRAW";
               const walletRes = await fetch(
                 "/api/auth?" +
                   new URLSearchParams({
                     wallet: (window as any).__agentfm_wallet ?? "",
                   }),
               );
-              if (walletRes.ok) {
-                const walletData = await walletRes.json();
-                const s = walletData.session;
-                if (s) {
-                  const expGained =
-                    result === "WIN"
-                      ? 50 + s.managerLevel * 10
-                      : result === "DRAW"
-                        ? 20
-                        : 10;
-
-                  const mvpEvent = sessionData.matchResult?.events
-                    ?.filter((e: any) => e.playerId)
-                    ?.reduce((best: any, e: any) => {
-                      const pts =
-                        e.type === "GOAL"
-                          ? 3
-                          : e.type === "SAVE"
-                            ? 2
-                            : e.type === "SHOT"
-                              ? 1
-                              : 0;
-                      return pts > (best?.pts ?? 0) ? { ...e, pts } : best;
-                    }, null);
-
-                  setExpPopup({
-                    result,
-                    expGained,
-                    newExp: s.managerExp,
-                    newLevel: s.managerLevel,
-                    leveledUp: false,
-                    mvpName: mvpEvent?.playerName ?? null,
-                  });
-                }
-              }
+              if (!walletRes.ok) return;
+              const { session: s } = await walletRes.json();
+              if (!s) return;
+              const expGained =
+                result === "WIN"
+                  ? 50 + s.managerLevel * 10
+                  : result === "DRAW"
+                    ? 20
+                    : 10;
+              setExpPopup({
+                result,
+                expGained,
+                newExp: s.managerExp,
+                newLevel: s.managerLevel,
+                leveledUp: false,
+                mvpName: null,
+              });
             } catch {}
           }, 1800);
         }
-
-        // Half-time modal — separate from FULL_TIME block to avoid type narrowing error
-        if (ev.type === "HALF_TIME" && isUserInMatchRef.current) {
-          setShowHalfTimeModal(true);
-        }
-
         const soundKey = eventToSound(ev.type);
         if (soundKey) play(soundKey);
       }
     },
-    [play],
+    [play, fixtureId, stopAmbience],
   );
 
-  if (loading) return <Centered>Loading...</Centered>;
-  if (error) return <Centered>Error: {error}</Centered>;
   if (!data) return <Centered>Not found</Centered>;
 
   const userTeam = data.homeTeam.isUserControlled
