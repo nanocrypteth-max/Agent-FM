@@ -339,7 +339,20 @@ function FriendlyRoom() {
   }
 
   const handleMinuteChange = useCallback(
-    (minute: number) => setLiveMinute(minute),
+    (minute: number, eventsThisMinute: MatchEvent[]) => {
+      setLiveMinute(minute);
+      setFeed((prev) => [...eventsThisMinute.slice().reverse(), ...prev]);
+      for (const ev of eventsThisMinute) {
+        if (ev.type === "GOAL") {
+          setLiveScore((s) =>
+            ev.team === "HOME"
+              ? { ...s, home: s.home + 1 }
+              : { ...s, away: s.away + 1 },
+          );
+        }
+        if (ev.type === "FULL_TIME") setMatchOver(true);
+      }
+    },
     [],
   );
   const homeSlots = formationToSlots("4-4-2", "HOME");
@@ -1001,12 +1014,66 @@ function FriendlyRoom() {
         </div>
       )}
 
-      {/* Live pitch */}
+      {/* Live pitch — same layout as league match */}
       {showPitch && (
         <div
           style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 12 }}
         >
-          <div className="panel" style={{ padding: 12 }}>
+          <div
+            className="panel"
+            style={{
+              padding: 12,
+              display: "flex",
+              flexDirection: "column",
+              gap: 10,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                fontFamily: "var(--display)",
+                fontSize: "0.8rem",
+                textTransform: "uppercase",
+                letterSpacing: 1.5,
+                color: "var(--ink-dim)",
+              }}
+            >
+              <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span
+                  style={{
+                    fontFamily: "var(--mono)",
+                    fontSize: "1.1rem",
+                    color: "var(--ws-gold)",
+                    fontWeight: 700,
+                  }}
+                >
+                  {liveScore.home} — {liveScore.away}
+                </span>
+                <span
+                  style={{
+                    fontSize: 13,
+                    color: "var(--ink-dim)",
+                    fontFamily: "var(--mono)",
+                  }}
+                >
+                  {matchOver ? "FT" : `${liveMinute}'`}
+                </span>
+              </span>
+              <span
+                className={matchOver ? "" : "ws-live-badge"}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  color: matchOver ? "var(--ink-dim)" : undefined,
+                }}
+              >
+                {!matchOver && <span className="live-dot" />}
+                {matchOver ? "FULL TIME" : "LIVE"}
+              </span>
+            </div>
             <PitchView
               events={events}
               homeStartingXI={homeStartingXI}
@@ -1019,8 +1086,12 @@ function FriendlyRoom() {
             />
           </div>
           <div
-            className="panel scroll-thin"
-            style={{ overflowY: "auto", maxHeight: 420 }}
+            className="panel"
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden",
+            }}
           >
             <div
               style={{
@@ -1036,56 +1107,182 @@ function FriendlyRoom() {
               Commentary
             </div>
             <div
+              className="scroll-thin"
               style={{
+                flex: 1,
+                overflowY: "auto",
+                maxHeight: 320,
                 padding: 8,
                 display: "flex",
                 flexDirection: "column",
                 gap: 2,
               }}
             >
-              {feed.length === 0 && (
+              {feed.filter((ev) => ev.type !== "KICK_OFF").length === 0 && (
                 <p
                   style={{ color: "var(--ink-dim)", fontSize: 12, padding: 8 }}
                 >
                   Match starting...
                 </p>
               )}
-              {feed.map((ev, i) => (
-                <div
-                  key={i}
-                  style={{
-                    padding: "6px 8px",
-                    fontSize: 12,
-                    display: "flex",
-                    gap: 8,
-                    borderLeft:
-                      ev.type === "GOAL"
-                        ? "2px solid var(--ws-gold)"
-                        : "2px solid transparent",
-                  }}
-                >
-                  <span
+              {feed
+                .filter((ev) => ev.type !== "KICK_OFF")
+                .map((ev, i) => (
+                  <div
+                    key={i}
                     style={{
-                      fontFamily: "var(--mono)",
-                      color: "var(--ink-dim)",
-                      minWidth: 28,
+                      padding: "6px 8px",
+                      fontSize: 12,
+                      display: "flex",
+                      gap: 8,
+                      alignItems: "center",
+                      borderLeft:
+                        ev.type === "GOAL"
+                          ? "2px solid var(--ws-gold)"
+                          : "2px solid transparent",
                     }}
                   >
-                    {ev.minute}&apos;
-                  </span>
-                  <span>
-                    {ev.type === "GOAL"
-                      ? "⚽ GOAL!"
-                      : ev.type === "SAVE"
-                        ? "🧤 Save"
-                        : ev.type === "YELLOW_CARD"
-                          ? "🟨 Yellow"
-                          : ev.type === "SHOT"
-                            ? "🎯 Shot"
-                            : ev.type === "HALF_TIME"
-                              ? "🔔 Half time"
-                              : ev.type}
-                  </span>
+                    <span
+                      style={{
+                        fontFamily: "var(--mono)",
+                        color: "var(--ink-dim)",
+                        minWidth: 28,
+                        flexShrink: 0,
+                        fontSize: 11,
+                      }}
+                    >
+                      {ev.minute}&apos;
+                    </span>
+                    <span
+                      style={{
+                        color:
+                          ev.type === "GOAL" ? "var(--ws-gold)" : "var(--ink)",
+                      }}
+                    >
+                      {ev.type === "GOAL"
+                        ? "⚽ GOAL!"
+                        : ev.type === "SAVE"
+                          ? "🧤 Great save"
+                          : ev.type === "YELLOW_CARD"
+                            ? "🟨 Yellow card"
+                            : ev.type === "RED_CARD"
+                              ? "🟥 Red card!"
+                              : ev.type === "SHOT"
+                                ? "🎯 Shot on target"
+                                : ev.type === "FOUL"
+                                  ? "⚠️ Foul"
+                                  : ev.type === "HALF_TIME"
+                                    ? "⏱ Half time"
+                                    : ev.type === "FULL_TIME"
+                                      ? "🏁 Full time"
+                                      : ev.type}
+                    </span>
+                  </div>
+                ))}
+            </div>
+            <div
+              style={{
+                borderTop: "1px solid var(--border)",
+                padding: "10px 12px",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 10,
+                  color: "var(--ink-dim)",
+                  textTransform: "uppercase",
+                  letterSpacing: 1,
+                  marginBottom: 8,
+                }}
+              >
+                Stats
+              </div>
+              {[
+                {
+                  label: "Shots",
+                  home: feed.filter(
+                    (e) =>
+                      e.team === "HOME" &&
+                      (e.type === "SHOT" || e.type === "GOAL"),
+                  ).length,
+                  away: feed.filter(
+                    (e) =>
+                      e.team === "AWAY" &&
+                      (e.type === "SHOT" || e.type === "GOAL"),
+                  ).length,
+                },
+                {
+                  label: "Saves",
+                  home: feed.filter(
+                    (e) => e.team === "HOME" && e.type === "SAVE",
+                  ).length,
+                  away: feed.filter(
+                    (e) => e.team === "AWAY" && e.type === "SAVE",
+                  ).length,
+                },
+                {
+                  label: "Fouls",
+                  home: feed.filter(
+                    (e) => e.team === "HOME" && e.type === "FOUL",
+                  ).length,
+                  away: feed.filter(
+                    (e) => e.team === "AWAY" && e.type === "FOUL",
+                  ).length,
+                },
+              ].map((s) => (
+                <div key={s.label} style={{ marginBottom: 6 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      fontSize: 10,
+                      marginBottom: 2,
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontFamily: "var(--mono)",
+                        color: "#4fc3f7",
+                        fontWeight: 700,
+                      }}
+                    >
+                      {s.home}
+                    </span>
+                    <span style={{ color: "var(--ink-dim)" }}>{s.label}</span>
+                    <span
+                      style={{
+                        fontFamily: "var(--mono)",
+                        color: "#ff9800",
+                        fontWeight: 700,
+                      }}
+                    >
+                      {s.away}
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      height: 3,
+                      background: "var(--border)",
+                      borderRadius: 2,
+                      overflow: "hidden",
+                      display: "flex",
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: `${(s.home / Math.max(s.home + s.away, 1)) * 100}%`,
+                        background: "#4fc3f7",
+                        transition: "width 0.4s",
+                      }}
+                    />
+                    <div
+                      style={{
+                        width: `${(s.away / Math.max(s.home + s.away, 1)) * 100}%`,
+                        background: "#ff9800",
+                        transition: "width 0.4s",
+                      }}
+                    />
+                  </div>
                 </div>
               ))}
             </div>

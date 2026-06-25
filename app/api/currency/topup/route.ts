@@ -5,10 +5,11 @@ import { Connection, PublicKey } from "@solana/web3.js";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-const RPC = process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? "https://api.devnet.solana.com";
+const RPC =
+  process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? "https://api.devnet.solana.com";
 const TREASURY = process.env.NEXT_PUBLIC_SOLANA_TREASURY ?? "";
 const LAMPORTS_PER_SOL = 1_000_000_000;
-const USD_PER_SOL = 10000;   // 1 SOL = $10,000
+const USD_PER_SOL = 10000; // 1 SOL = $10,000
 const CENTS_PER_USD = 100;
 
 /**
@@ -21,11 +22,17 @@ export async function POST(req: NextRequest) {
   const { solanaWallet, solAmount, txHash } = await req.json();
 
   if (!solanaWallet || !solAmount || !txHash) {
-    return NextResponse.json({ error: "solanaWallet, solAmount, txHash required" }, { status: 400 });
+    return NextResponse.json(
+      { error: "solanaWallet, solAmount, txHash required" },
+      { status: 400 },
+    );
   }
 
-  const session = await prisma.userSession.findUnique({ where: { solanaWallet } });
-  if (!session) return NextResponse.json({ error: "Session not found" }, { status: 404 });
+  const session = await prisma.userSession.findUnique({
+    where: { solanaWallet },
+  });
+  if (!session)
+    return NextResponse.json({ error: "Session not found" }, { status: 404 });
 
   // Verify SOL tx
   try {
@@ -35,26 +42,68 @@ export async function POST(req: NextRequest) {
       maxSupportedTransactionVersion: 0,
     });
 
-    if (!tx) return NextResponse.json({ error: "Transaction not found" }, { status: 400 });
-    if (tx.meta?.err) return NextResponse.json({ error: "Transaction failed on-chain" }, { status: 400 });
+    if (!tx) {
+      console.error("[topup] tx not found:", txHash);
+      return NextResponse.json(
+        { error: "Transaction not found" },
+        { status: 400 },
+      );
+    }
+    if (tx.meta?.err) {
+      console.error("[topup] tx failed on-chain:", tx.meta.err);
+      return NextResponse.json(
+        { error: "Transaction failed on-chain" },
+        { status: 400 },
+      );
+    }
 
     const expectedLamports = Math.round(solAmount * LAMPORTS_PER_SOL);
     const treasuryPubkey = new PublicKey(TREASURY);
     const accountKeys = tx.transaction.message.getAccountKeys
       ? tx.transaction.message.getAccountKeys().staticAccountKeys
-      : (tx.transaction.message as any).accountKeys as PublicKey[];
+      : ((tx.transaction.message as any).accountKeys as PublicKey[]);
 
-    const treasuryIndex = accountKeys.findIndex((k) => k.toBase58() === treasuryPubkey.toBase58());
+    console.log("[topup] treasury env:", TREASURY);
+    console.log(
+      "[topup] accountKeys:",
+      accountKeys.map((k: PublicKey) => k.toBase58()),
+    );
+
+    const treasuryIndex = accountKeys.findIndex(
+      (k: PublicKey) => k.toBase58() === treasuryPubkey.toBase58(),
+    );
     if (treasuryIndex === -1) {
-      return NextResponse.json({ error: "Payment not sent to treasury" }, { status: 400 });
+      console.error(
+        "[topup] treasury not in tx. Expected:",
+        treasuryPubkey.toBase58(),
+      );
+      return NextResponse.json(
+        { error: "Payment not sent to treasury" },
+        { status: 400 },
+      );
     }
 
-    const received = tx.meta!.postBalances[treasuryIndex] - tx.meta!.preBalances[treasuryIndex];
+    const received =
+      tx.meta!.postBalances[treasuryIndex] -
+      tx.meta!.preBalances[treasuryIndex];
+    console.log(
+      "[topup] received lamports:",
+      received,
+      "expected:",
+      expectedLamports,
+    );
     if (received < expectedLamports * 0.99) {
-      return NextResponse.json({ error: `Insufficient payment` }, { status: 400 });
+      return NextResponse.json(
+        { error: `Insufficient payment` },
+        { status: 400 },
+      );
     }
   } catch (err) {
-    return NextResponse.json({ error: "Could not verify transaction" }, { status: 500 });
+    console.error("[topup] verify error:", err);
+    return NextResponse.json(
+      { error: "Could not verify transaction" },
+      { status: 500 },
+    );
   }
 
   const usdEarnedCents = Math.round(solAmount * USD_PER_SOL * CENTS_PER_USD);

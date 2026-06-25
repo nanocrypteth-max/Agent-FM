@@ -187,7 +187,9 @@ function PortalContent() {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: selected ? "1fr 380px" : "1fr",
+          gridTemplateColumns: selected
+            ? "minmax(0,1fr) min(380px, 40vw)"
+            : "1fr",
           gap: 14,
           alignItems: "flex-start",
         }}
@@ -324,7 +326,10 @@ function PortalContent() {
                   top: 80,
                   maxHeight: "calc(100vh - 120px)",
                   overflowY: "auto",
+                  overflowX: "hidden",
                   wordBreak: "break-word",
+                  overflowWrap: "break-word",
+                  minWidth: 0,
                   boxSizing: "border-box",
                 }}
               >
