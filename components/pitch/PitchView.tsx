@@ -12,14 +12,13 @@ interface PitchViewProps {
   speed?: number;
   onMinuteChange?: (minute: number, eventsThisMinute: MatchEvent[]) => void;
   paused?: boolean;
-  /** If true, pitch renders vertically (portrait) — home attacks upward */
   vertical?: boolean;
 }
 
 const PLAYER_RADIUS_PCT = 0.021;
-const BALL_RADIUS_PCT = 0.008;
+const BALL_RADIUS_PCT = 0.013; // slightly larger than before
 const TRANSITION_DURATION_MS = 600;
-const MAX_DELAY_MS = 1600; // cap "dead air" between far-apart events
+const MAX_DELAY_MS = 1600;
 
 const COLORS = {
   pitchA: "#1e5631",
@@ -27,7 +26,6 @@ const COLORS = {
   line: "rgba(255,255,255,0.35)",
   home: "#ff5252",
   away: "#4fc3f7",
-  ball: "#ffffff",
 };
 
 interface PlayerState {
@@ -52,7 +50,6 @@ export default function PitchView({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const animFrameRef = useRef<number>();
-
   const [eventIndex, setEventIndex] = useState(0);
   const playersRef = useRef<Map<string, PlayerState>>(new Map());
   const ballRef = useRef<{
@@ -65,7 +62,6 @@ export default function PitchView({
     transitionStart: performance.now(),
   });
 
-  // Track previous startingXI to avoid spurious resets when parent re-renders
   const verticalRef = useRef(vertical);
   useEffect(() => {
     verticalRef.current = vertical;
@@ -73,6 +69,8 @@ export default function PitchView({
 
   const prevStartingXIRef = useRef<string>("");
 
+  // homeStartingXI/awayStartingXI contains player IDs.
+  // We map them to formation slot positions so players appear on the pitch.
   useEffect(() => {
     const key = JSON.stringify([homeStartingXI, awayStartingXI]);
     const changed = key !== prevStartingXIRef.current;
@@ -80,7 +78,7 @@ export default function PitchView({
 
     const map = new Map<string, PlayerState>();
     homeStartingXI.forEach((id, i) => {
-      const pos = homeFormationSlots[i] ?? { x: 50, y: 50 };
+      const pos = homeFormationSlots[i] ?? { x: 20, y: 50 };
       map.set(id, {
         id,
         team: "HOME",
@@ -90,7 +88,7 @@ export default function PitchView({
       });
     });
     awayStartingXI.forEach((id, i) => {
-      const pos = awayFormationSlots[i] ?? { x: 50, y: 50 };
+      const pos = awayFormationSlots[i] ?? { x: 80, y: 50 };
       map.set(id, {
         id,
         team: "AWAY",
@@ -101,21 +99,109 @@ export default function PitchView({
     });
     playersRef.current = map;
 
-    // Only reset event playback when startingXI actually changes content.
-    // This prevents resetting on every parent re-render which causes the
-    // "looping KICK_OFF" bug where eventIndex resets to 0 mid-playback.
     if (changed && homeStartingXI.length > 0) {
       setEventIndex(0);
     }
   }, [homeStartingXI, awayStartingXI, homeFormationSlots, awayFormationSlots]);
 
+  // Stale-ref for resetToFormation closure
+  const homeXIRef = useRef(homeStartingXI);
+  const awayXIRef = useRef(awayStartingXI);
+  const homeSlotRef = useRef(homeFormationSlots);
+  const awaySlotRef = useRef(awayFormationSlots);
+  useEffect(() => {
+    homeXIRef.current = homeStartingXI;
+  }, [homeStartingXI]);
+  useEffect(() => {
+    awayXIRef.current = awayStartingXI;
+  }, [awayStartingXI]);
+  useEffect(() => {
+    homeSlotRef.current = homeFormationSlots;
+  }, [homeFormationSlots]);
+  useEffect(() => {
+    awaySlotRef.current = awayFormationSlots;
+  }, [awayFormationSlots]);
+
+  const resetToFormation = useCallback((now: number) => {
+    homeXIRef.current.forEach((id, i) => {
+      const pos = homeSlotRef.current[i] ?? { x: 20, y: 50 };
+      const p = playersRef.current.get(id);
+      if (p)
+        playersRef.current.set(id, {
+          ...p,
+          current: p.target,
+          target: pos,
+          transitionStart: now,
+        });
+    });
+    awayXIRef.current.forEach((id, i) => {
+      const pos = awaySlotRef.current[i] ?? { x: 80, y: 50 };
+      const p = playersRef.current.get(id);
+      if (p)
+        playersRef.current.set(id, {
+          ...p,
+          current: p.target,
+          target: pos,
+          transitionStart: now,
+        });
+    });
+    ballRef.current = {
+      current: ballRef.current.target,
+      target: { x: 50, y: 50 },
+      transitionStart: now,
+    };
+  }, []);
+
+  const applyEvent = useCallback(
+    (event: MatchEvent) => {
+      const now = performance.now();
+      const pos: Position2D | undefined = event.position;
+
+      // Guard: only move ball/player if position is a valid coordinate
+      if (
+        pos &&
+        typeof pos.x === "number" &&
+        typeof pos.y === "number" &&
+        !isNaN(pos.x) &&
+        !isNaN(pos.y)
+      ) {
+        ballRef.current = {
+          current: ballRef.current.target,
+          target: pos,
+          transitionStart: now,
+        };
+
+        if (event.playerId) {
+          const player = playersRef.current.get(event.playerId);
+          if (player) {
+            playersRef.current.set(event.playerId, {
+              ...player,
+              current: player.target,
+              target: pos,
+              transitionStart: now,
+            });
+          }
+        }
+      }
+
+      if (
+        event.type === "GOAL" ||
+        event.type === "HALF_TIME" ||
+        event.type === "KICK_OFF"
+      ) {
+        resetToFormation(now);
+      }
+    },
+    [resetToFormation],
+  );
+
+  // Event consumption loop
   useEffect(() => {
     if (paused) return;
     if (eventIndex >= events.length) return;
 
     const event = events[eventIndex];
     const prevEvent = events[eventIndex - 1];
-
     const minuteGap = prevEvent ? event.minute - prevEvent.minute : 0;
     const delayMs = Math.min(
       MAX_DELAY_MS,
@@ -135,68 +221,9 @@ export default function PitchView({
     }, delayMs);
 
     return () => clearTimeout(timer);
-  }, [eventIndex, events, speed, onMinuteChange, paused]);
+  }, [eventIndex, events, speed, onMinuteChange, paused, applyEvent]);
 
-  const applyEvent = useCallback((event: MatchEvent) => {
-    const now = performance.now();
-
-    ballRef.current = {
-      current: ballRef.current.target,
-      target: event.position,
-      transitionStart: now,
-    };
-
-    if (event.playerId) {
-      const player = playersRef.current.get(event.playerId);
-      if (player) {
-        playersRef.current.set(event.playerId, {
-          ...player,
-          current: player.target,
-          target: event.position,
-          transitionStart: now,
-        });
-      }
-    }
-
-    if (
-      event.type === "GOAL" ||
-      event.type === "HALF_TIME" ||
-      event.type === "KICK_OFF"
-    ) {
-      resetToFormation(now);
-    }
-  }, []);
-
-  const resetToFormation = (now: number) => {
-    homeStartingXI.forEach((id, i) => {
-      const pos = homeFormationSlots[i] ?? { x: 50, y: 50 };
-      const p = playersRef.current.get(id);
-      if (p)
-        playersRef.current.set(id, {
-          ...p,
-          current: p.target,
-          target: pos,
-          transitionStart: now,
-        });
-    });
-    awayStartingXI.forEach((id, i) => {
-      const pos = awayFormationSlots[i] ?? { x: 50, y: 50 };
-      const p = playersRef.current.get(id);
-      if (p)
-        playersRef.current.set(id, {
-          ...p,
-          current: p.target,
-          target: pos,
-          transitionStart: now,
-        });
-    });
-    ballRef.current = {
-      current: ballRef.current.target,
-      target: { x: 50, y: 50 },
-      transitionStart: now,
-    };
-  };
-
+  // Canvas draw loop
   useEffect(() => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
@@ -207,7 +234,6 @@ export default function PitchView({
     const draw = () => {
       const { width, height } = canvas;
       const now = performance.now();
-
       ctx.clearRect(0, 0, width, height);
       drawPitch(ctx, width, height, verticalRef.current);
 
@@ -255,13 +281,13 @@ export default function PitchView({
     };
     resize();
     window.addEventListener("resize", resize);
-
     animFrameRef.current = requestAnimationFrame(draw);
+
     return () => {
       window.removeEventListener("resize", resize);
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     };
-  }, []);
+  }, []); // intentionally empty — draw loop runs continuously
 
   return (
     <div ref={containerRef} style={{ width: "100%" }}>
@@ -273,8 +299,6 @@ export default function PitchView({
   );
 }
 
-// Convert game coords (0-100 x=left→right, y=top→bottom) to canvas pixels
-// In vertical mode: x (left→right in game) maps to canvas Y, y (top→bot) maps to canvas X
 function toCanvas(
   pos: Position2D,
   w: number,
@@ -282,7 +306,6 @@ function toCanvas(
   vertical: boolean,
 ): [number, number] {
   if (!vertical) return [(pos.x / 100) * w, (pos.y / 100) * h];
-  // Vertical: home attacks upward (from bottom). Flip x axis.
   return [(pos.y / 100) * w, ((100 - pos.x) / 100) * h];
 }
 
@@ -298,27 +321,21 @@ function drawPitch(
     ctx.fillStyle = i % 2 === 0 ? COLORS.pitchA : COLORS.pitchB;
     ctx.fillRect(i * stripeWidth, 0, stripeWidth, h);
   }
-
   ctx.strokeStyle = COLORS.line;
   ctx.lineWidth = 2;
-
   const m = w * 0.03;
   ctx.strokeRect(m, m, w - 2 * m, h - 2 * m);
-
   ctx.beginPath();
   ctx.moveTo(w / 2, m);
   ctx.lineTo(w / 2, h - m);
   ctx.stroke();
-
   ctx.beginPath();
   ctx.arc(w / 2, h / 2, w * 0.08, 0, Math.PI * 2);
   ctx.stroke();
-
   const boxW = w * 0.14;
   const boxH = h * 0.56;
   ctx.strokeRect(m, (h - boxH) / 2, boxW, boxH);
   ctx.strokeRect(w - m - boxW, (h - boxH) / 2, boxW, boxH);
-
   const sixW = w * 0.05;
   const sixH = h * 0.28;
   ctx.strokeRect(m, (h - sixH) / 2, sixW, sixH);
@@ -336,7 +353,6 @@ function drawPlayer(
 ) {
   const [x, y] = toCanvas(pos, w, h, vertical);
   const r = radiusPct * Math.min(w, h);
-
   ctx.beginPath();
   ctx.arc(x, y, r, 0, Math.PI * 2);
   ctx.fillStyle = color;
@@ -357,7 +373,6 @@ function drawBall(
   const [x, y] = toCanvas(pos, w, h, vertical);
   const r = radiusPct * Math.min(w, h);
 
-  // White circle base
   ctx.beginPath();
   ctx.arc(x, y, r, 0, Math.PI * 2);
   ctx.fillStyle = "#ffffff";
@@ -366,7 +381,6 @@ function drawBall(
   ctx.strokeStyle = "#222";
   ctx.stroke();
 
-  // Central pentagon patch
   ctx.beginPath();
   for (let i = 0; i < 5; i++) {
     const angle = (Math.PI * 2 * i) / 5 - Math.PI / 2;
@@ -378,7 +392,6 @@ function drawBall(
   ctx.fillStyle = "#111";
   ctx.fill();
 
-  // 5 outer hexagon patches
   for (let i = 0; i < 5; i++) {
     const angle = (Math.PI * 2 * i) / 5 - Math.PI / 2;
     const px = x + r * 0.72 * Math.cos(angle);
@@ -395,7 +408,6 @@ function drawBall(
     ctx.fill();
   }
 
-  // Shine highlight
   ctx.beginPath();
   ctx.arc(x - r * 0.28, y - r * 0.28, r * 0.22, 0, Math.PI * 2);
   ctx.fillStyle = "rgba(255,255,255,0.55)";

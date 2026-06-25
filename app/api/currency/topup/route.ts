@@ -28,6 +28,15 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Fail early if treasury not configured — prevents silent wrong-address issues
+  if (!TREASURY || TREASURY.length < 32) {
+    console.error("[topup] NEXT_PUBLIC_SOLANA_TREASURY not set or invalid");
+    return NextResponse.json(
+      { error: "Server configuration error: treasury not set" },
+      { status: 500 },
+    );
+  }
+
   const session = await prisma.userSession.findUnique({
     where: { solanaWallet },
   });

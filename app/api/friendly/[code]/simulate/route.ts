@@ -120,29 +120,26 @@ export async function POST(
     const result = simulateMatch(simInput, lobby.id);
     const channel = CHANNELS.friendly(code);
 
-    // 1. Send lineup data on a SEPARATE event (not MATCH_START) to avoid
-    //    triggering the client's "match-start" → call simulate loop.
-    //    Client listens to "lineup-data" to init PitchView players.
+    // Send lineup-data first so client inits PitchView players
     await pusher.trigger(channel, "lineup-data", {
       homeStartingXI: hostTactics.startingXI,
       awayStartingXI: guestTactics.startingXI,
     });
 
-    // 2. Signal match has started (UI shows pitch, timer begins)
+    // Signal match started
     await pusher.trigger(channel, EVENTS.MATCH_START, { friendlyId: lobby.id });
 
-    // 3. Wait for client to process lineup-data and init playersRef
-    await new Promise((r) => setTimeout(r, 1200));
+    // Short pause for client to process lineup-data (400ms stays well within 10s Vercel limit)
+    await new Promise((r) => setTimeout(r, 400));
 
-    // 4. Stream events in small batches — 1 event per push with 800ms gap
-    //    so PitchView has time to animate each event before the next arrives.
-    //    Vercel Hobby 10s timeout: ~20 events × 800ms = 16s — too slow.
-    //    Compromise: batch of 1, 500ms gap = ~10s for 20 events.
-    for (let i = 0; i < result.events.length; i++) {
-      await pusher.trigger(channel, EVENTS.MATCH_EVENT, {
-        events: [result.events[i]],
-      });
-      await new Promise((r) => setTimeout(r, 500));
+    // Stream events in batches of 3 with 200ms gap.
+    // ~30 events / 3 = 10 batches × 200ms = 2s total — safe within 10s limit.
+    // PitchView queues events client-side and animates them at natural pace via minuteGap timing.
+    const BATCH = 3;
+    for (let i = 0; i < result.events.length; i += BATCH) {
+      const batch = result.events.slice(i, i + BATCH);
+      await pusher.trigger(channel, EVENTS.MATCH_EVENT, { events: batch });
+      await new Promise((r) => setTimeout(r, 200));
     }
 
     // Save match result

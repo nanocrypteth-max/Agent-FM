@@ -396,15 +396,50 @@ function FriendlyRoom() {
           <TeamChip team={lobby.hostTeam} ready={lobby.hostReady} />
           <div style={{ textAlign: "center" }}>
             {showPitch ? (
-              <div
-                style={{
-                  fontFamily: "var(--mono)",
-                  fontSize: "2rem",
-                  fontWeight: 700,
-                  letterSpacing: 4,
-                }}
-              >
-                {liveScore.home} — {liveScore.away}
+              <div>
+                <div
+                  style={{
+                    fontFamily: "var(--mono)",
+                    fontSize: "2rem",
+                    fontWeight: 700,
+                    letterSpacing: 4,
+                  }}
+                >
+                  {liveScore.home} — {liveScore.away}
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 8,
+                    marginTop: 4,
+                  }}
+                >
+                  <span
+                    style={{
+                      fontFamily: "var(--mono)",
+                      fontSize: 13,
+                      color: matchOver ? "var(--ink-dim)" : "var(--ws-gold)",
+                    }}
+                  >
+                    {matchOver ? "FT" : `${liveMinute}'`}
+                  </span>
+                  {!matchOver && (
+                    <span
+                      className="ws-live-badge"
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 4,
+                        fontSize: 10,
+                      }}
+                    >
+                      <span className="live-dot" />
+                      LIVE
+                    </span>
+                  )}
+                </div>
               </div>
             ) : (
               <div>
