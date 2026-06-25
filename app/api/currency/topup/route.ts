@@ -37,15 +37,24 @@ export async function POST(req: NextRequest) {
   // Verify SOL tx
   try {
     const connection = new Connection(RPC, "confirmed");
-    const tx = await connection.getTransaction(txHash, {
+
+    // Frontend already waited for confirmation, but add one retry as safety net
+    let tx = await connection.getTransaction(txHash, {
       commitment: "confirmed",
       maxSupportedTransactionVersion: 0,
     });
+    if (!tx) {
+      await new Promise((r) => setTimeout(r, 3000));
+      tx = await connection.getTransaction(txHash, {
+        commitment: "confirmed",
+        maxSupportedTransactionVersion: 0,
+      });
+    }
 
     if (!tx) {
       console.error("[topup] tx not found:", txHash);
       return NextResponse.json(
-        { error: "Transaction not found" },
+        { error: "Transaction not found. Please try again in a few seconds." },
         { status: 400 },
       );
     }

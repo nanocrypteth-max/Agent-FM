@@ -219,6 +219,9 @@ function FriendlyRoom() {
             setHomeStartingXI(data.homeStartingXI);
           if (data.awayStartingXI?.length)
             setAwayStartingXI(data.awayStartingXI);
+          // Reset events so PitchView starts from index 0 after players are initialized
+          setEvents([]);
+          setFeed([]);
         },
       );
 
@@ -312,21 +315,13 @@ function FriendlyRoom() {
 
   async function markReady() {
     setIsReady(true);
-    const res = await fetch(`/api/friendly/${code}/ready`, {
+    await fetch(`/api/friendly/${code}/ready`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ solanaWallet: walletAddress }),
     });
-    const data = await res.json();
-    // Host triggers simulate if they're the last to ready
-    if (data.bothReady && lobby?.hostTeamId === session?.teamId) {
-      setSimulating(true);
-      fetch(`/api/friendly/${code}/simulate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ solanaWallet: walletAddress }),
-      }).catch(() => {});
-    }
+    // Simulate is triggered by the "both-ready" Pusher event handler above
+    // Do NOT call simulate here — would cause double-call and 409
   }
 
   async function cancelLobby() {
