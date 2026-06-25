@@ -12,14 +12,14 @@ export async function GET(req: NextRequest) {
   const maxStar = parseInt(searchParams.get("maxStar") ?? "5");
   const sellerWallet = searchParams.get("sellerWallet");
   const includeSOLD = searchParams.get("includeSOLD") === "true";
+  const usdOnly = searchParams.get("usd") === "1"; // new filter for USD tab
 
   const listings = await prisma.transferListing.findMany({
     where: {
-      // If sellerWallet + includeSOLD: show LISTED and SOLD for seller
-      // Otherwise: only show LISTED
       status:
         sellerWallet && includeSOLD ? { in: ["LISTED", "SOLD"] } : "LISTED",
-      isSOLListing: true,
+      // Filter by listing type
+      ...(usdOnly ? { isUSDListing: true } : { isSOLListing: true }),
       ...(sellerWallet ? { sellerWallet } : {}),
       player: {
         starRating: { gte: minStar, lte: maxStar },

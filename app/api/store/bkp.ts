@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { Connection, PublicKey } from "@solana/web3.js";
-// import { generatePlayer } from "@/lib/team-generator/generateTeam";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";

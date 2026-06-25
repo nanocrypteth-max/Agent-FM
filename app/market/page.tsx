@@ -78,18 +78,20 @@ export default function MarketPage() {
 
 function MarketContent() {
   const { walletAddress, session } = useAuth();
-  const [tab, setTab] = useState<"browse" | "my-listings">("browse");
+  const [tab, setTab] = useState<"browse" | "usd" | "store" | "my-listings">(
+    "browse",
+  );
 
   return (
     <div className="page">
       <div className="ws-hero" style={{ marginBottom: 20 }}>
         <div className="ws-badge">
           <span className="pulse-ball" />
-          Transfer Market · SOL
+          Transfer Market
         </div>
         <h1 className="ws-title">Player Market</h1>
         <p className="ws-subtitle">
-          Buy and sell players using Solana. Set your own price.
+          Buy players with SOL, in-game USD, or from the official game store.
         </p>
       </div>
 
@@ -100,13 +102,20 @@ function MarketContent() {
           gap: 4,
           marginBottom: 20,
           borderBottom: "1px solid var(--border)",
-          paddingBottom: 0,
+          flexWrap: "wrap",
         }}
       >
-        {(["browse", "my-listings"] as const).map((t) => (
+        {(
+          [
+            { id: "browse", label: "🔵 SOL Market" },
+            { id: "usd", label: "💵 USD Market" },
+            { id: "store", label: "🌟 Game Store" },
+            { id: "my-listings", label: "📋 My Listings" },
+          ] as const
+        ).map((t) => (
           <button
-            key={t}
-            onClick={() => setTab(t)}
+            key={t.id}
+            onClick={() => setTab(t.id)}
             style={{
               padding: "10px 20px",
               border: "none",
@@ -116,22 +125,27 @@ function MarketContent() {
               fontFamily: "var(--display)",
               textTransform: "uppercase",
               letterSpacing: 1,
-              color: tab === t ? "var(--ws-gold)" : "var(--ink-dim)",
+              color: tab === t.id ? "var(--ws-gold)" : "var(--ink-dim)",
               borderBottom:
-                tab === t
+                tab === t.id
                   ? "2px solid var(--ws-gold)"
                   : "2px solid transparent",
               marginBottom: -1,
             }}
           >
-            {t === "browse" ? "🛒 Browse Market" : "📋 My Listings"}
+            {t.label}
           </button>
         ))}
       </div>
 
-      {tab === "browse" ? (
+      {tab === "browse" && (
         <BrowseTab walletAddress={walletAddress} session={session} />
-      ) : (
+      )}
+      {tab === "usd" && (
+        <USDMarketTab walletAddress={walletAddress} session={session} />
+      )}
+      {tab === "store" && <GameStoreTab walletAddress={walletAddress} />}
+      {tab === "my-listings" && (
         <MyListingsTab walletAddress={walletAddress} session={session} />
       )}
     </div>
@@ -1006,6 +1020,495 @@ function Centered({ children }: { children: React.ReactNode }) {
       }}
     >
       {children}
+    </div>
+  );
+}
+
+// ─── USD Market Tab ───────────────────────────────────────────────────────────
+
+function USDMarketTab({
+  walletAddress,
+  session,
+}: {
+  walletAddress: string | null;
+  session: any;
+}) {
+  const [listings, setListings] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [buying, setBuying] = useState<string | null>(null);
+  const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/market?usd=1")
+      .then((r) => r.json())
+      .then((d) => {
+        setListings(d.listings ?? []);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, []);
+
+  async function handleBuyUSD(listing: any) {
+    if (!walletAddress) return;
+    setBuying(listing.id);
+    const res = await fetch("/api/market/buy-usd", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        buyerWallet: walletAddress,
+        listingId: listing.id,
+      }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      setMsg({ text: `✓ Signed ${data.player}!`, ok: true });
+      setListings((prev) => prev.filter((l) => l.id !== listing.id));
+    } else {
+      setMsg({ text: data.error, ok: false });
+    }
+    setBuying(null);
+  }
+
+  const balance = (session?.usdBalance ?? 0) / 100;
+
+  if (loading) return <Centered>Loading...</Centered>;
+
+  return (
+    <div>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 16,
+        }}
+      >
+        <div style={{ fontSize: 13, color: "var(--ink-dim)" }}>
+          Players listed for in-game USD by other managers
+        </div>
+        <div
+          style={{
+            fontFamily: "var(--mono)",
+            fontSize: 13,
+            color: "var(--ws-green-bright)",
+          }}
+        >
+          Balance: <strong>${balance.toLocaleString()}</strong>
+        </div>
+      </div>
+
+      {msg && (
+        <div
+          style={{
+            padding: "10px 14px",
+            borderRadius: 6,
+            marginBottom: 12,
+            fontSize: 13,
+            background: msg.ok ? "rgba(46,204,113,0.1)" : "rgba(255,82,82,0.1)",
+            color: msg.ok ? "var(--ws-green-bright)" : "#ff5252",
+            border: `1px solid ${msg.ok ? "rgba(46,204,113,0.3)" : "rgba(255,82,82,0.3)"}`,
+          }}
+        >
+          {msg.text}
+        </div>
+      )}
+
+      {listings.length === 0 ? (
+        <div
+          className="panel"
+          style={{ padding: 32, textAlign: "center", color: "var(--ink-dim)" }}
+        >
+          No USD listings right now. List your own players from My Listings tab.
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {listings
+            .filter((l) => l.sellerWallet !== walletAddress)
+            .map((l) => (
+              <div
+                key={l.id}
+                className="panel"
+                style={{
+                  padding: "12px 16px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 14,
+                }}
+              >
+                <div
+                  style={{
+                    width: 40,
+                    height: 40,
+                    borderRadius: "50%",
+                    background: posBg(l.player.position),
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: "#0a0d12",
+                    flexShrink: 0,
+                  }}
+                >
+                  {l.player.position}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13 }}>
+                    {l.player.name}
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--ink-dim)" }}>
+                    {"★".repeat(l.player.starRating)} · {l.player.nationality}
+                  </div>
+                </div>
+                <div style={{ textAlign: "right", marginRight: 12 }}>
+                  <div
+                    style={{
+                      fontFamily: "var(--mono)",
+                      fontWeight: 700,
+                      color: "var(--ws-green-bright)",
+                      fontSize: 16,
+                    }}
+                  >
+                    ${(l.priceUSD / 100).toLocaleString()}
+                  </div>
+                  <div style={{ fontSize: 10, color: "var(--ink-dim)" }}>
+                    in-game USD
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleBuyUSD(l)}
+                  disabled={buying === l.id || balance < l.priceUSD / 100}
+                  style={{
+                    padding: "8px 18px",
+                    borderRadius: 6,
+                    border: "none",
+                    background:
+                      balance >= l.priceUSD / 100
+                        ? "var(--ws-green-bright)"
+                        : "var(--border)",
+                    color: "#0a0d12",
+                    fontFamily: "var(--display)",
+                    fontWeight: 700,
+                    fontSize: 12,
+                    cursor:
+                      balance >= l.priceUSD / 100 ? "pointer" : "not-allowed",
+                    flexShrink: 0,
+                  }}
+                >
+                  {buying === l.id ? "..." : "Buy"}
+                </button>
+              </div>
+            ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Game Store Tab ───────────────────────────────────────────────────────────
+
+const STORE_SOL_PRICE: Record<number, number> = { 3: 0.05, 4: 0.1, 5: 0.2 };
+const STORE_STAR_COLOR: Record<number, string> = {
+  3: "#4fc3f7",
+  4: "#ff9800",
+  5: "#ffd700",
+};
+
+function GameStoreTab({ walletAddress }: { walletAddress: string | null }) {
+  const [players, setPlayers] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [buying, setBuying] = useState<string | null>(null);
+  const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  const [filterStar, setFilterStar] = useState<number | null>(null);
+
+  useEffect(() => {
+    fetch("/api/store")
+      .then((r) => r.json())
+      .then((d) => {
+        setPlayers(d.players ?? []);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, []);
+
+  async function handleBuy(player: any) {
+    if (!walletAddress) return;
+    const solPrice = STORE_SOL_PRICE[player.starRating];
+    const TREASURY = process.env.NEXT_PUBLIC_SOLANA_TREASURY;
+    if (!TREASURY) {
+      setMsg({ text: "Treasury not configured", ok: false });
+      return;
+    }
+
+    setBuying(player.id);
+    setMsg(null);
+    try {
+      const { Connection, PublicKey, Transaction, SystemProgram } =
+        await import("@solana/web3.js");
+      const phantom = (window as any).phantom?.solana ?? (window as any).solana;
+      if (!phantom) throw new Error("No wallet found");
+
+      const connection = new Connection(
+        process.env.NEXT_PUBLIC_SOLANA_RPC_URL ??
+          "https://api.devnet.solana.com",
+        "confirmed",
+      );
+      const tx = new Transaction().add(
+        SystemProgram.transfer({
+          fromPubkey: new PublicKey(walletAddress),
+          toPubkey: new PublicKey(TREASURY),
+          lamports: Math.round(solPrice * 1_000_000_000),
+        }),
+      );
+      const { blockhash } = await connection.getLatestBlockhash();
+      tx.recentBlockhash = blockhash;
+      tx.feePayer = new PublicKey(walletAddress);
+
+      const { signature } = await phantom.signAndSendTransaction(tx);
+
+      const res = await fetch("/api/store", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          solanaWallet: walletAddress,
+          storePlayerId: player.id,
+          txHash: signature,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setMsg({ text: `✓ ${player.name} joined your squad!`, ok: true });
+        setPlayers((prev) => prev.filter((p) => p.id !== player.id));
+      } else {
+        setMsg({ text: data.error, ok: false });
+      }
+    } catch (e: any) {
+      setMsg({ text: e?.message ?? "Purchase failed", ok: false });
+    }
+    setBuying(null);
+  }
+
+  const filtered = filterStar
+    ? players.filter((p) => p.starRating === filterStar)
+    : players;
+
+  if (loading) return <Centered>Loading store...</Centered>;
+
+  return (
+    <div>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 16,
+          flexWrap: "wrap",
+          gap: 8,
+        }}
+      >
+        <div style={{ fontSize: 13, color: "var(--ink-dim)" }}>
+          Official game store — buy premium players with SOL
+        </div>
+        <div style={{ display: "flex", gap: 6 }}>
+          {[null, 3, 4, 5].map((s) => (
+            <button
+              key={s ?? "all"}
+              onClick={() => setFilterStar(s)}
+              style={{
+                padding: "5px 12px",
+                borderRadius: 20,
+                border: "1px solid",
+                borderColor:
+                  filterStar === s ? "var(--ws-gold)" : "var(--border)",
+                background:
+                  filterStar === s ? "rgba(255,215,0,0.1)" : "transparent",
+                color: filterStar === s ? "var(--ws-gold)" : "var(--ink-dim)",
+                cursor: "pointer",
+                fontSize: 11,
+              }}
+            >
+              {s === null ? "All" : `${"★".repeat(s)}`}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {msg && (
+        <div
+          style={{
+            padding: "10px 14px",
+            borderRadius: 6,
+            marginBottom: 12,
+            fontSize: 13,
+            background: msg.ok ? "rgba(46,204,113,0.1)" : "rgba(255,82,82,0.1)",
+            color: msg.ok ? "var(--ws-green-bright)" : "#ff5252",
+            border: `1px solid ${msg.ok ? "rgba(46,204,113,0.3)" : "rgba(255,82,82,0.3)"}`,
+          }}
+        >
+          {msg.text}
+        </div>
+      )}
+
+      {filtered.length === 0 ? (
+        <div
+          className="panel"
+          style={{ padding: 32, textAlign: "center", color: "var(--ink-dim)" }}
+        >
+          {players.length === 0 ? (
+            <>
+              Store is empty.{" "}
+              <a
+                href={`/api/store/seed?secret=${typeof window !== "undefined" ? "" : ""}`}
+                style={{ color: "var(--ws-gold)" }}
+              >
+                Seed players
+              </a>{" "}
+              first.
+            </>
+          ) : (
+            "No players matching this filter."
+          )}
+        </div>
+      ) : (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+            gap: 12,
+          }}
+        >
+          {filtered.map((p) => {
+            const color = STORE_STAR_COLOR[p.starRating];
+            const sol = STORE_SOL_PRICE[p.starRating];
+            const stats = [
+              ["PAC", p.pace],
+              ["SHO", p.shooting],
+              ["PAS", p.passing],
+              ["DEF", p.defending],
+            ] as [string, number][];
+            return (
+              <div
+                key={p.id}
+                className="panel"
+                style={{
+                  padding: 18,
+                  border: `1px solid ${color}33`,
+                  background: `${color}06`,
+                  position: "relative",
+                  overflow: "hidden",
+                }}
+              >
+                <div
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    height: 2,
+                    background: `linear-gradient(90deg, transparent, ${color}, transparent)`,
+                  }}
+                />
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "flex-start",
+                    marginBottom: 12,
+                  }}
+                >
+                  <div>
+                    <div
+                      style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}
+                    >
+                      {p.name}
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--ink-dim)" }}>
+                      {p.nationality} · {p.age}y · {p.position}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right", flexShrink: 0 }}>
+                    <div style={{ color, fontSize: 16 }}>
+                      {"★".repeat(p.starRating)}
+                    </div>
+                    <div
+                      style={{
+                        fontFamily: "var(--mono)",
+                        fontWeight: 700,
+                        color,
+                        fontSize: 13,
+                      }}
+                    >
+                      {sol} SOL
+                    </div>
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(4, 1fr)",
+                    gap: 4,
+                    marginBottom: 14,
+                  }}
+                >
+                  {stats.map(([l, v]) => (
+                    <div
+                      key={l}
+                      style={{
+                        textAlign: "center",
+                        background: "rgba(255,255,255,0.04)",
+                        borderRadius: 4,
+                        padding: "5px 2px",
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontFamily: "var(--mono)",
+                          fontSize: 15,
+                          fontWeight: 700,
+                          color: statColor(v),
+                        }}
+                      >
+                        {v}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 8,
+                          color: "var(--ink-dim)",
+                          textTransform: "uppercase",
+                        }}
+                      >
+                        {l}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <button
+                  onClick={() => handleBuy(p)}
+                  disabled={buying === p.id}
+                  style={{
+                    width: "100%",
+                    padding: "9px",
+                    borderRadius: 6,
+                    border: "none",
+                    background: buying === p.id ? "var(--border)" : color,
+                    color: "#0a0d12",
+                    fontFamily: "var(--display)",
+                    fontWeight: 700,
+                    fontSize: 12,
+                    textTransform: "uppercase",
+                    letterSpacing: 1,
+                    cursor: buying === p.id ? "not-allowed" : "pointer",
+                  }}
+                >
+                  {buying === p.id ? "Processing..." : `Buy for ${sol} SOL`}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

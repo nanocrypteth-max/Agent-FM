@@ -52,7 +52,6 @@ export default function PitchView({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const animFrameRef = useRef<number>();
-  const prevStartingXIRef = useRef<string>("");
 
   const [eventIndex, setEventIndex] = useState(0);
   const playersRef = useRef<Map<string, PlayerState>>(new Map());
@@ -71,6 +70,8 @@ export default function PitchView({
   useEffect(() => {
     verticalRef.current = vertical;
   }, [vertical]);
+
+  const prevStartingXIRef = useRef<string>("");
 
   useEffect(() => {
     const key = JSON.stringify([homeStartingXI, awayStartingXI]);
