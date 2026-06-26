@@ -211,7 +211,7 @@ function FriendlyRoom() {
         }
       });
 
-      // lineup-data: init PitchView players (sent BEFORE match-start)
+      // lineup-data: init PitchView players (sent BEFORE match-start and events)
       channel.bind(
         "lineup-data",
         (data: { homeStartingXI: string[]; awayStartingXI: string[] }) => {
@@ -219,9 +219,8 @@ function FriendlyRoom() {
             setHomeStartingXI(data.homeStartingXI);
           if (data.awayStartingXI?.length)
             setAwayStartingXI(data.awayStartingXI);
-          // Reset events so PitchView starts from index 0 after players are initialized
-          setEvents([]);
-          setFeed([]);
+          // PitchView resets eventIndex internally when startingXI changes (via prevStartingXIRef)
+          // so we don't need to reset events here — that would lose events received before this
         },
       );
 
@@ -231,18 +230,10 @@ function FriendlyRoom() {
       });
 
       channel.bind("match-event", (data: { events: MatchEvent[] }) => {
+        // Only append to events array — PitchView consumes them via onMinuteChange
+        // which calls handleMinuteChange to update feed, score, and matchOver.
+        // Do NOT update feed/score/minute directly here — would bypass PitchView animation.
         setEvents((prev) => [...prev, ...data.events]);
-        setFeed((prev) => [...data.events.slice().reverse(), ...prev]);
-        data.events.forEach((ev) => {
-          if (ev.type === "GOAL") {
-            setLiveScore((s) =>
-              ev.team === "HOME"
-                ? { ...s, home: s.home + 1 }
-                : { ...s, away: s.away + 1 },
-            );
-          }
-          if (ev.minute) setLiveMinute(ev.minute);
-        });
       });
 
       channel.bind("match-end", (data: any) => {
