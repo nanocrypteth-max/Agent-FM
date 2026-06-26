@@ -105,6 +105,10 @@ function FriendlyRoom() {
   const sessionRef = useRef(session);
   const lobbyRef = useRef(lobby);
   const walletRef = useRef(walletAddress);
+  const pendingExpRef = useRef<{
+    result: "WIN" | "DRAW" | "LOSS";
+    expGained: number;
+  } | null>(null);
   useEffect(() => {
     sessionRef.current = session;
   }, [session]);
@@ -211,47 +215,48 @@ function FriendlyRoom() {
         }
       });
 
-      // lineup-data: init PitchView players (sent BEFORE match-start and events)
+      // match-ready: server has saved result to DB and sends ALL data in one event.
+      // Client replays events locally — same architecture as league match.
+      // This avoids race conditions with Pusher event ordering.
       channel.bind(
-        "lineup-data",
-        (data: { homeStartingXI: string[]; awayStartingXI: string[] }) => {
-          if (data.homeStartingXI?.length)
-            setHomeStartingXI(data.homeStartingXI);
-          if (data.awayStartingXI?.length)
-            setAwayStartingXI(data.awayStartingXI);
-          // PitchView resets eventIndex internally when startingXI changes (via prevStartingXIRef)
-          // so we don't need to reset events here — that would lose events received before this
+        "match-ready",
+        (data: {
+          matchResultId: string;
+          homeStartingXI: string[];
+          awayStartingXI: string[];
+          events: MatchEvent[];
+          homeScore: number;
+          awayScore: number;
+          homeExpGained: number;
+          awayExpGained: number;
+          homeTeamId: string;
+          awayTeamId: string;
+        }) => {
+          // 1. Init players in PitchView
+          setHomeStartingXI(data.homeStartingXI);
+          setAwayStartingXI(data.awayStartingXI);
+
+          // 2. Set all events — PitchView will consume them one by one with minuteGap timing
+          setEvents(data.events);
+
+          // 3. Show pitch
+          setSimulating(true);
+
+          // 4. Store EXP info for popup (shown after FULL_TIME event is processed)
+          const myTeamId = sessionRef.current?.teamId;
+          if (myTeamId) {
+            const isHome = myTeamId === data.homeTeamId;
+            const myScore = isHome ? data.homeScore : data.awayScore;
+            const oppScore = isHome ? data.awayScore : data.homeScore;
+            const result: "WIN" | "DRAW" | "LOSS" =
+              myScore > oppScore ? "WIN" : myScore < oppScore ? "LOSS" : "DRAW";
+            const expGained = isHome ? data.homeExpGained : data.awayExpGained;
+            // Delay popup until PitchView finishes — FULL_TIME triggers matchOver → EXP popup
+            // Store in ref to be used by handleMinuteChange
+            pendingExpRef.current = { result, expGained };
+          }
         },
       );
-
-      // match-start: show pitch UI (sent AFTER lineup-data)
-      channel.bind("match-start", (_data: { friendlyId: string }) => {
-        setSimulating(true);
-      });
-
-      channel.bind("match-event", (data: { events: MatchEvent[] }) => {
-        // Only append to events array — PitchView consumes them via onMinuteChange
-        // which calls handleMinuteChange to update feed, score, and matchOver.
-        // Do NOT update feed/score/minute directly here — would bypass PitchView animation.
-        setEvents((prev) => [...prev, ...data.events]);
-      });
-
-      channel.bind("match-end", (data: any) => {
-        setLiveScore({ home: data.homeScore, away: data.awayScore });
-        setMatchOver(true);
-        setSimulating(false);
-        const myTeamId = sessionRef.current?.teamId;
-        if (myTeamId) {
-          const isHome = myTeamId === data.homeTeamId;
-          const myScore = isHome ? data.homeScore : data.awayScore;
-          const oppScore = isHome ? data.awayScore : data.homeScore;
-          const result: "WIN" | "DRAW" | "LOSS" =
-            myScore > oppScore ? "WIN" : myScore < oppScore ? "LOSS" : "DRAW";
-          const expGained = isHome ? data.homeExpGained : data.awayExpGained;
-          if (expGained != null)
-            setTimeout(() => setExpPopup({ result, expGained }), 1500);
-        }
-      });
 
       channel.bind("lobby-expired", () => setError("Lobby has expired."));
       channel.bind("lobby-cancelled", () =>
@@ -336,7 +341,15 @@ function FriendlyRoom() {
               : { ...s, away: s.away + 1 },
           );
         }
-        if (ev.type === "FULL_TIME") setMatchOver(true);
+        if (ev.type === "FULL_TIME") {
+          setMatchOver(true);
+          // Show EXP popup 1.5s after full time
+          if (pendingExpRef.current) {
+            const exp = pendingExpRef.current;
+            setTimeout(() => setExpPopup(exp), 1500);
+            pendingExpRef.current = null;
+          }
+        }
       }
     },
     [],

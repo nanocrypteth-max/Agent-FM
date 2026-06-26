@@ -12,11 +12,6 @@ import type { MatchSimInput } from "@/lib/match-engine/types";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-/**
- * POST /api/friendly/:code/simulate
- * Called by host when both players are ready.
- * Simulates match, streams events via Pusher, awards EXP.
- */
 export async function POST(
   req: NextRequest,
   { params }: { params: { code: string } },
@@ -41,14 +36,12 @@ export async function POST(
       { status: 403 },
     );
   }
-
   if (!lobby.hostReady || !lobby.guestReady) {
     return NextResponse.json(
       { error: "Both players must be ready" },
       { status: 400 },
     );
   }
-
   if (!lobby.guestTeam) {
     return NextResponse.json({ error: "No guest team" }, { status: 400 });
   }
@@ -57,7 +50,7 @@ export async function POST(
   if (lobby.hostTeam.players.length < MIN_PLAYERS) {
     return NextResponse.json(
       {
-        error: `${lobby.hostTeam.name} needs at least ${MIN_PLAYERS} players to play.`,
+        error: `${lobby.hostTeam.name} needs at least ${MIN_PLAYERS} players.`,
       },
       { status: 400 },
     );
@@ -65,13 +58,13 @@ export async function POST(
   if (lobby.guestTeam.players.length < MIN_PLAYERS) {
     return NextResponse.json(
       {
-        error: `${lobby.guestTeam.name} needs at least ${MIN_PLAYERS} players to play.`,
+        error: `${lobby.guestTeam.name} needs at least ${MIN_PLAYERS} players.`,
       },
       { status: 400 },
     );
   }
 
-  // Distributed lock: prevent double-simulate
+  // Distributed lock — prevent double simulate
   const lockKey = KEYS.matchLock(lobby.id);
   const acquired = await redis.set(lockKey, "1", { nx: true, ex: 120 });
   if (!acquired)
@@ -93,8 +86,6 @@ export async function POST(
         stamina: p.stamina,
       }));
 
-    // Use deterministic fallback tactics — skips Gemini to avoid 429 quota errors
-    // and Vercel function timeout. Match quality is identical; only AI reasoning text differs.
     const hostTactics = buildFallbackTactics(makeSquad(lobby.hostTeam));
     const guestTactics = buildFallbackTactics(makeSquad(lobby.guestTeam));
 
@@ -118,31 +109,8 @@ export async function POST(
     };
 
     const result = simulateMatch(simInput, lobby.id);
-    const channel = CHANNELS.friendly(code);
 
-    // Send lineup-data first so client inits PitchView players
-    await pusher.trigger(channel, "lineup-data", {
-      homeStartingXI: hostTactics.startingXI,
-      awayStartingXI: guestTactics.startingXI,
-    });
-
-    // Signal match started
-    await pusher.trigger(channel, EVENTS.MATCH_START, { friendlyId: lobby.id });
-
-    // Short pause for client to process lineup-data (400ms stays well within 10s Vercel limit)
-    await new Promise((r) => setTimeout(r, 400));
-
-    // Stream events in batches of 3 with 200ms gap.
-    // ~30 events / 3 = 10 batches × 200ms = 2s total — safe within 10s limit.
-    // PitchView queues events client-side and animates them at natural pace via minuteGap timing.
-    const BATCH = 3;
-    for (let i = 0; i < result.events.length; i += BATCH) {
-      const batch = result.events.slice(i, i + BATCH);
-      await pusher.trigger(channel, EVENTS.MATCH_EVENT, { events: batch });
-      await new Promise((r) => setTimeout(r, 200));
-    }
-
-    // Save match result
+    // Save result to DB first — client will fetch and replay locally (same as league match)
     const matchResult = await prisma.matchResult.create({
       data: {
         friendlyId: lobby.id,
@@ -154,13 +122,12 @@ export async function POST(
       },
     });
 
-    // Update lobby status
     await prisma.friendlyMatch.update({
       where: { id: lobby.id },
       data: { status: "COMPLETED" },
     });
 
-    // Award reduced EXP for friendly match (half of normal match EXP, no level-up portal)
+    // Award EXP (non-blocking)
     awardFriendlyExp({
       homeTeamId: lobby.hostTeamId,
       awayTeamId: lobby.guestTeam.id,
@@ -168,50 +135,41 @@ export async function POST(
       awayScore: result.awayScore,
     }).catch(() => {});
 
-    // Broadcast match end with EXP info for popup
-    const friendlyExpWin = 25;
-    const friendlyExpDraw = 10;
-    const friendlyExpLoss = 5;
-    const homeResult =
+    // EXP values for popup
+    const EXP = { WIN: 25, DRAW: 10, LOSS: 5 };
+    const homeRes =
       result.homeScore > result.awayScore
         ? "WIN"
         : result.homeScore < result.awayScore
           ? "LOSS"
           : "DRAW";
-    const awayResult =
-      homeResult === "WIN" ? "LOSS" : homeResult === "LOSS" ? "WIN" : "DRAW";
+    const awayRes =
+      homeRes === "WIN" ? "LOSS" : homeRes === "LOSS" ? "WIN" : "DRAW";
 
-    await pusher.trigger(channel, EVENTS.MATCH_END, {
+    const channel = CHANNELS.friendly(code);
+
+    // Notify both clients: match is ready to replay.
+    // Include ALL data needed by client: startingXIs + events + result.
+    // Client fetches nothing — all data in this single Pusher event.
+    await pusher.trigger(channel, "match-ready", {
+      matchResultId: matchResult.id,
+      homeStartingXI: hostTactics.startingXI,
+      awayStartingXI: guestTactics.startingXI,
+      events: result.events,
       homeScore: result.homeScore,
       awayScore: result.awayScore,
-      matchResultId: matchResult.id,
-      homeExpGained:
-        homeResult === "WIN"
-          ? friendlyExpWin
-          : homeResult === "DRAW"
-            ? friendlyExpDraw
-            : friendlyExpLoss,
-      awayExpGained:
-        awayResult === "WIN"
-          ? friendlyExpWin
-          : awayResult === "DRAW"
-            ? friendlyExpDraw
-            : friendlyExpLoss,
+      homeExpGained: EXP[homeRes],
+      awayExpGained: EXP[awayRes],
       homeTeamId: lobby.hostTeamId,
       awayTeamId: lobby.guestTeam.id,
     });
 
-    return NextResponse.json({
-      success: true,
-      homeScore: result.homeScore,
-      awayScore: result.awayScore,
-    });
+    return NextResponse.json({ success: true });
   } finally {
     await redis.del(lockKey);
   }
 }
 
-// Friendly match EXP — half of regular league match values, no level-up portal message
 async function awardFriendlyExp({
   homeTeamId,
   awayTeamId,
@@ -228,28 +186,24 @@ async function awardFriendlyExp({
     prisma.userSession.findUnique({ where: { teamId: homeTeamId } }),
     prisma.userSession.findUnique({ where: { teamId: awayTeamId } }),
   ]);
-
   const homeResult =
     homeScore > awayScore ? "WIN" : homeScore < awayScore ? "LOSS" : "DRAW";
   const awayResult =
     homeResult === "WIN" ? "LOSS" : homeResult === "LOSS" ? "WIN" : "DRAW";
-
   const updates = [];
-  if (homeSession) {
+  if (homeSession)
     updates.push(
       prisma.userSession.update({
         where: { id: homeSession.id },
         data: { managerExp: { increment: EXP[homeResult] } },
       }),
     );
-  }
-  if (awaySession) {
+  if (awaySession)
     updates.push(
       prisma.userSession.update({
         where: { id: awaySession.id },
         data: { managerExp: { increment: EXP[awayResult] } },
       }),
     );
-  }
   await Promise.all(updates);
 }
