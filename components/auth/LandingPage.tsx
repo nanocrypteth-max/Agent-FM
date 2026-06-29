@@ -147,10 +147,10 @@ export default function LandingPage() {
             }}
           >
             <span style={{ fontSize: 22 }}>🏆</span>
-            {loading ? "Connecting..." : "Connect Wallet / Login"}
+            {loading ? "Connecting..." : "Connect Phantom Wallet"}
           </button>
           <p style={{ fontSize: 12, color: "var(--ink-dim)" }}>
-            Connect with Phantom, Solflare, or login with Email
+            Requires Phantom wallet on Solana devnet
           </p>
         </div>
 

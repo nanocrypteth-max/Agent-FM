@@ -26,18 +26,15 @@ export interface UserSession {
 
 export function useAuth() {
   const { ready, authenticated, user, login, logout: privyLogout } = usePrivy();
-  const { wallets, createWallet } = useSolanaWallets();
+  const { wallets } = useSolanaWallets();
 
   const [session, setSession] = useState<UserSession | null>(null);
-  // Start as true — stays true until first sync attempt completes.
-  // This prevents AuthWall from briefly showing LandingPage between
-  // "Privy authenticated" and "session fetched from /api/auth".
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const isSyncing = useRef(false);
   const hasSynced = useRef(false);
 
-  // Primary Solana wallet — embedded or external
+  // Only use external wallet (Phantom) — no embedded wallet
   const solanaWallet = wallets[0]?.address ?? null;
 
   const syncSession = useCallback(async (wallet: string, privyId: string) => {
@@ -67,64 +64,25 @@ export function useAuth() {
     if (!ready || !authenticated || !user) {
       if (ready && !authenticated) {
         setSession(null);
-        setLoading(false); // not logged in — stop loading, show LandingPage
+        setLoading(false);
         hasSynced.current = false;
       }
       return;
     }
 
-    // Case 1: wallet already available → sync immediately
     if (solanaWallet && !hasSynced.current) {
       syncSession(solanaWallet, user.id);
       return;
     }
 
-    // Case 2: authenticated but no wallet yet (email login — embedded wallet being created)
-    // Poll every 500ms until wallet appears, max 15s
-    if (!solanaWallet && !hasSynced.current) {
-      let attempts = 0;
-      const maxAttempts = 30; // 30 × 500ms = 15s
-
-      const interval = setInterval(async () => {
-        attempts++;
-
-        // Try to create wallet if it doesn't exist yet
-        if (attempts === 3) {
-          try {
-            await createWallet();
-          } catch {
-            // Wallet might already be in creation, ignore
-          }
-        }
-
-        // Check if wallet appeared
-        const currentWallets = wallets;
-        if (currentWallets.length > 0 && currentWallets[0]?.address) {
-          clearInterval(interval);
-          syncSession(currentWallets[0].address, user.id);
-        }
-
-        if (attempts >= maxAttempts) {
-          clearInterval(interval);
-          setError("Wallet setup timed out. Please refresh and try again.");
-          setLoading(false);
-        }
-      }, 500);
-
-      setLoading(true);
-      return () => clearInterval(interval);
+    // No wallet connected after auth — user may have dismissed Phantom
+    if (!solanaWallet && ready && authenticated) {
+      setLoading(false);
+      setError("No wallet connected. Please connect Phantom and try again.");
     }
-  }, [
-    ready,
-    authenticated,
-    user,
-    solanaWallet,
-    syncSession,
-    wallets,
-    createWallet,
-  ]);
+  }, [ready, authenticated, user, solanaWallet, syncSession]);
 
-  // When wallet appears after polling, sync if not yet done
+  // When wallet appears (Phantom connected), sync immediately
   useEffect(() => {
     if (
       solanaWallet &&
