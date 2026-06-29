@@ -47,6 +47,7 @@ function GachaContent({ walletAddress }: { walletAddress: string }) {
   const [error, setError] = useState<string | null>(null);
   const [spinHistory, setSpinHistory] = useState<SpinResult[]>([]);
   const [animating, setAnimating] = useState(false);
+  const { wallets } = useSolanaWallets();
   const ctaHover = useHoverSound("cta");
   const subtleHover = useHoverSound("subtle");
 
@@ -60,8 +61,6 @@ function GachaContent({ walletAddress }: { walletAddress: string }) {
     setPackOpen(false);
 
     try {
-      const { wallets } = useSolanaWallets();
-
       const privyWallet = wallets[0];
       if (!privyWallet) throw new Error("No wallet found. Please reconnect.");
 
