@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useSolanaWallets } from "@privy-io/react-auth";
 import { useAuth } from "@/lib/auth/useAuth";
 import AuthWall from "@/components/auth/AuthWall";
 import { useHoverSound } from "@/lib/sound/useHoverSound";
@@ -50,6 +51,7 @@ export default function TopupPage() {
 
 function TopupContent() {
   const { walletAddress, session, refetch } = useAuth();
+  const { wallets } = useSolanaWallets();
   const [buying, setBuying] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const ctaHover = useHoverSound("cta");
@@ -67,8 +69,8 @@ function TopupContent() {
     try {
       const { Connection, PublicKey, Transaction, SystemProgram } =
         await import("@solana/web3.js");
-      const phantom = (window as any).phantom?.solana ?? (window as any).solana;
-      if (!phantom) throw new Error("No wallet found");
+      const privyWallet = wallets[0];
+      if (!privyWallet) throw new Error("No wallet found. Please reconnect.");
 
       const connection = new Connection(
         process.env.NEXT_PUBLIC_SOLANA_RPC_URL ??
@@ -88,7 +90,7 @@ function TopupContent() {
       tx.recentBlockhash = blockhash;
       tx.feePayer = new PublicKey(walletAddress);
 
-      const { signature } = await phantom.signAndSendTransaction(tx);
+      const signature = await privyWallet.sendTransaction(tx, connection);
 
       // Wait for confirmation before calling API — prevents "tx not found" error
       const { blockhash: _bh, lastValidBlockHeight } =

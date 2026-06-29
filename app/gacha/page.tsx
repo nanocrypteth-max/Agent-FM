@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useSolanaWallets } from "@privy-io/react-auth";
 import { useAuth } from "@/lib/auth/useAuth";
 import { useHoverSound } from "@/lib/sound/useHoverSound";
 import {
@@ -59,8 +60,10 @@ function GachaContent({ walletAddress }: { walletAddress: string }) {
     setPackOpen(false);
 
     try {
-      const phantom = (window as any).phantom?.solana ?? (window as any).solana;
-      if (!phantom?.isPhantom) throw new Error("Phantom wallet not found");
+      const { wallets } = useSolanaWallets();
+
+      const privyWallet = wallets[0];
+      if (!privyWallet) throw new Error("No wallet found. Please reconnect.");
 
       const connection = new Connection(RPC_URL, "confirmed");
       const priceSol =
@@ -79,8 +82,8 @@ function GachaContent({ walletAddress }: { walletAddress: string }) {
       tx.recentBlockhash = blockhash;
       tx.feePayer = new PublicKey(walletAddress);
 
-      // Sign and send via Phantom directly
-      const { signature } = await phantom.signAndSendTransaction(tx);
+      // Sign and send via Privy wallet (works for email/embedded and Phantom)
+      const signature = await privyWallet.sendTransaction(tx, connection);
 
       const res = await fetch("/api/gacha/verify-spin", {
         method: "POST",
