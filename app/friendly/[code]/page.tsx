@@ -82,6 +82,7 @@ function FriendlyRoom() {
     null,
   );
   const [lineupConfirmed, setLineupConfirmed] = useState(false);
+  const [importingTactics, setImportingTactics] = useState(false);
   // Track opponent confirmation status for poin 4
   const [opponentConfirmed, setOpponentConfirmed] = useState(false);
   const [opponentFormation, setOpponentFormation] = useState<string | null>(
@@ -307,6 +308,36 @@ function FriendlyRoom() {
         playerIds: startingXIFromSlots,
       }),
     });
+  }
+
+  // Import saved tactics from Squad page
+  async function importSavedTactics() {
+    if (!walletAddress) return;
+    setImportingTactics(true);
+    try {
+      const res = await fetch(`/api/squad?wallet=${walletAddress}`);
+      const data = await res.json();
+      if (!res.ok) return;
+
+      const { team, players } = data;
+      if (!team?.formation) return;
+
+      // Apply saved formation
+      setSelectedFormation(team.formation);
+
+      // Apply saved slot assignments
+      const savedMap = new Map<number, string>();
+      (players as SquadPlayer[]).forEach((p) => {
+        if (p.slotIndex !== null && p.slotIndex !== undefined) {
+          savedMap.set(p.slotIndex, p.id);
+        }
+      });
+
+      if (savedMap.size >= 11) {
+        setSlotMap(savedMap);
+      }
+    } catch {}
+    setImportingTactics(false);
   }
 
   async function markReady() {
@@ -577,6 +608,37 @@ function FriendlyRoom() {
                     flexWrap: "wrap",
                   }}
                 >
+                  {/* Import Saved Tactics button */}
+                  <button
+                    onClick={importSavedTactics}
+                    disabled={importingTactics || lineupConfirmed}
+                    title="Import formation and lineup from your saved Squad tactics"
+                    style={{
+                      padding: "7px 12px",
+                      borderRadius: 6,
+                      border: "1px solid rgba(79,195,247,0.4)",
+                      background: "rgba(79,195,247,0.08)",
+                      color:
+                        importingTactics || lineupConfirmed
+                          ? "var(--ink-dim)"
+                          : "#4fc3f7",
+                      fontSize: 12,
+                      fontFamily: "var(--display)",
+                      textTransform: "uppercase",
+                      letterSpacing: 1,
+                      cursor:
+                        importingTactics || lineupConfirmed
+                          ? "not-allowed"
+                          : "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      flexShrink: 0,
+                    }}
+                  >
+                    {importingTactics ? "⏳ Importing..." : "📋 Import Tactics"}
+                  </button>
+
                   <select
                     value={selectedFormation}
                     onChange={(e) => {
