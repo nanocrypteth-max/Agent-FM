@@ -4,7 +4,7 @@ import { useAuth } from "@/lib/auth/useAuth";
 import { useHoverSound } from "@/lib/sound/useHoverSound";
 import { APP_NAME, APP_TAGLINE } from "@/lib/config";
 import { useEffect, useState } from "react";
-import Image from "next/image";
+import AppLogo from "@/components/ui/AppLogo";
 
 const FEATURES = [
   {
@@ -84,14 +84,7 @@ export default function LandingPage() {
             animation: "ws-float 3s ease-in-out infinite",
           }}
         >
-          <Image
-            src="/logo.png"
-            alt={APP_NAME}
-            width={340}
-            height={144}
-            priority
-            style={{ width: "min(340px, 80vw)", height: "auto" }}
-          />
+          <AppLogo size={200} priority />
         </div>
 
         <div className="ws-badge" style={{ marginBottom: 16 }}>
@@ -147,10 +140,10 @@ export default function LandingPage() {
             }}
           >
             <span style={{ fontSize: 22 }}>🏆</span>
-            {loading ? "Connecting..." : "Connect Phantom Wallet"}
+            {loading ? "Connecting..." : "Connect Wallet / Login"}
           </button>
           <p style={{ fontSize: 12, color: "var(--ink-dim)" }}>
-            Requires Phantom wallet on Solana devnet
+            Connect with Phantom, Solflare, or login with Email
           </p>
         </div>
 
