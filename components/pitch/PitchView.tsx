@@ -16,9 +16,21 @@ interface PitchViewProps {
 }
 
 const PLAYER_RADIUS_PCT = 0.021;
-const BALL_RADIUS_PCT = 0.013; // slightly larger than before
+const BALL_RADIUS_PCT = 0.013;
 const TRANSITION_DURATION_MS = 600;
-const MAX_DELAY_MS = 1600;
+
+// ─── Per-half pacing ────────────────────────────────────────────────────────
+// Target: each half (45 in-game minutes) plays out in ~2.5 real minutes (150s).
+// That's 150s / 45min ≈ 3.33s of real time per in-game minute, regardless of
+// how many events land in that minute. This replaces the old "minuteGap * 800ms"
+// approach, which made total duration unpredictable (could be 1min or 5min
+// depending on event density). Now duration is consistent every match.
+const MS_PER_GAME_MINUTE = 3300;
+// Minimum delay between consecutive event applications within the same minute,
+// so multiple events in one minute don't all render instantly.
+const MIN_EVENT_GAP_MS = 350;
+// Pause shown at half-time before second half begins (real ms).
+const HALF_TIME_PAUSE_MS = 2500;
 
 const COLORS = {
   pitchA: "#1e5631",
@@ -34,6 +46,8 @@ interface PlayerState {
   current: Position2D;
   target: Position2D;
   transitionStart: number;
+  // Idle jitter phase — unique per player so they don't all bob in sync
+  idlePhase: number;
 }
 
 export default function PitchView({
@@ -85,6 +99,7 @@ export default function PitchView({
         current: pos,
         target: pos,
         transitionStart: performance.now(),
+        idlePhase: Math.random() * Math.PI * 2,
       });
     });
     awayStartingXI.forEach((id, i) => {
@@ -95,6 +110,7 @@ export default function PitchView({
         current: pos,
         target: pos,
         transitionStart: performance.now(),
+        idlePhase: Math.random() * Math.PI * 2,
       });
     });
     playersRef.current = map;
@@ -157,7 +173,6 @@ export default function PitchView({
       const now = performance.now();
       const pos: Position2D | undefined = event.position;
 
-      // Guard: only move ball/player if position is a valid coordinate
       if (
         pos &&
         typeof pos.x === "number" &&
@@ -195,7 +210,12 @@ export default function PitchView({
     [resetToFormation],
   );
 
-  // Event consumption loop
+  // ─── Event consumption loop ─────────────────────────────────────────────
+  // Pacing: each in-game minute takes MS_PER_GAME_MINUTE real ms regardless of
+  // how many events occur in it. Multiple events within the same minute are
+  // spaced MIN_EVENT_GAP_MS apart so they don't all flash at once.
+  // At HALF_TIME, we insert an explicit pause (HALF_TIME_PAUSE_MS) before
+  // continuing — this is what creates the felt "break" between halves.
   useEffect(() => {
     if (paused) return;
     if (eventIndex >= events.length) return;
@@ -203,10 +223,20 @@ export default function PitchView({
     const event = events[eventIndex];
     const prevEvent = events[eventIndex - 1];
     const minuteGap = prevEvent ? event.minute - prevEvent.minute : 0;
-    const delayMs = Math.min(
-      MAX_DELAY_MS,
-      Math.max(80, (minuteGap * 800) / speed),
-    );
+
+    let delayMs: number;
+    if (minuteGap > 0) {
+      // Crossed into a new in-game minute — pace by the fixed per-minute budget
+      delayMs = (minuteGap * MS_PER_GAME_MINUTE) / speed;
+    } else {
+      // Same minute as previous event — small fixed gap so it's visible but quick
+      delayMs = MIN_EVENT_GAP_MS / speed;
+    }
+
+    // Extra real pause right after HALF_TIME so the break is felt, not just a blip
+    if (prevEvent?.type === "HALF_TIME") {
+      delayMs += HALF_TIME_PAUSE_MS / speed;
+    }
 
     const timer = setTimeout(() => {
       applyEvent(event);
@@ -223,7 +253,7 @@ export default function PitchView({
     return () => clearTimeout(timer);
   }, [eventIndex, events, speed, onMinuteChange, paused, applyEvent]);
 
-  // Canvas draw loop
+  // ─── Canvas draw loop ────────────────────────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
@@ -238,12 +268,25 @@ export default function PitchView({
       drawPitch(ctx, width, height, verticalRef.current);
 
       for (const player of playersRef.current.values()) {
-        const pos = interpolate(
+        let pos = interpolate(
           player.current,
           player.target,
           player.transitionStart,
           now,
         );
+
+        // Idle movement: once a player's move-to-target transition has finished,
+        // give them a small sinusoidal wobble around their resting position so
+        // the pitch doesn't look frozen between events. Purely visual — does
+        // NOT mutate player.target, so event-driven movement is unaffected.
+        const sinceTransition = now - player.transitionStart;
+        if (sinceTransition > TRANSITION_DURATION_MS) {
+          const t = now / 1000;
+          const idleX = Math.sin(t * 0.6 + player.idlePhase) * 0.6;
+          const idleY = Math.cos(t * 0.5 + player.idlePhase * 1.3) * 0.5;
+          pos = { x: pos.x + idleX, y: pos.y + idleY };
+        }
+
         drawPlayer(
           ctx,
           pos,
