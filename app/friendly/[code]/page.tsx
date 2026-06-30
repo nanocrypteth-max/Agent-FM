@@ -73,6 +73,11 @@ function FriendlyRoom() {
   const [error, setError] = useState<string | null>(null);
   const [isReady, setIsReady] = useState(false);
   const [simulating, setSimulating] = useState(false);
+  // Poin 1: popup when leaving lobby mid-game
+  const [showLeavePopup, setShowLeavePopup] = useState(false);
+  // Poin 2: popup when trying to navigate away during active match
+  const [showSurrenderPopup, setShowSurrenderPopup] = useState(false);
+  const [surrendering, setSurrendering] = useState(false);
 
   // Lineup confirmation state (poin 3 & 4)
   const [myPlayers, setMyPlayers] = useState<SquadPlayer[]>([]);
@@ -268,6 +273,17 @@ function FriendlyRoom() {
         setError("Host cancelled the lobby."),
       );
 
+      // Poin 2: opponent surrendered — show win popup to the remaining player
+      channel.bind("opponent-surrendered", (data: { winnerTeamId: string }) => {
+        const myTeamId = sessionRef.current?.teamId;
+        if (myTeamId === data.winnerTeamId) {
+          // I am the winner
+          setTimeout(() => setExpPopup({ result: "WIN", expGained: 25 }), 500);
+        }
+        setMatchOver(true);
+        setSimulating(false);
+      });
+
       return channel;
     });
 
@@ -359,6 +375,52 @@ function FriendlyRoom() {
     router.push("/friendly");
   }
 
+  // Poin 1: back button — if lobby still active, show confirmation popup
+  function handleBackButton() {
+    if (matchOver) {
+      router.push("/friendly");
+      return;
+    }
+    if (showPitch) {
+      // Match in progress — surrender popup
+      setShowSurrenderPopup(true);
+    } else if (
+      lobby &&
+      lobby.status !== "COMPLETED" &&
+      lobby.status !== "CANCELLED"
+    ) {
+      // Still in lobby — leave popup
+      setShowLeavePopup(true);
+    } else {
+      router.push("/friendly");
+    }
+  }
+
+  // Poin 1: confirm leave lobby
+  async function confirmLeave() {
+    await fetch(`/api/friendly/${code}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ solanaWallet: walletAddress }),
+    });
+    router.push("/friendly");
+  }
+
+  // Poin 2: confirm surrender during active match
+  async function confirmSurrender() {
+    setSurrendering(true);
+    await fetch(`/api/friendly/${code}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        solanaWallet: walletAddress,
+        action: "surrender",
+      }),
+    });
+    setSurrendering(false);
+    router.push("/friendly");
+  }
+
   const handleMinuteChange = useCallback(
     (minute: number, eventsThisMinute: MatchEvent[]) => {
       setLiveMinute(minute);
@@ -407,10 +469,7 @@ function FriendlyRoom() {
 
   return (
     <div className="page">
-      <button
-        onClick={() => router.push("/friendly")}
-        className="ws-back-button"
-      >
+      <button onClick={handleBackButton} className="ws-back-button">
         <span className="ws-back-icon">🏆</span>
         <span>Lobbies</span>
         <span className="ws-back-arrow">→</span>
@@ -427,7 +486,11 @@ function FriendlyRoom() {
             flexWrap: "wrap",
           }}
         >
-          <TeamChip team={lobby.hostTeam} ready={lobby.hostReady} />
+          <TeamChip
+            team={lobby.hostTeam}
+            ready={lobby.hostReady}
+            matching={showPitch && !matchOver}
+          />
           <div style={{ textAlign: "center" }}>
             {showPitch ? (
               <div>
@@ -509,6 +572,7 @@ function FriendlyRoom() {
             }
             ready={lobby.guestReady}
             waiting={!lobby.guestTeam}
+            matching={showPitch && !matchOver}
           />
         </div>
       </div>
@@ -1561,6 +1625,209 @@ function FriendlyRoom() {
         </div>
       )}
 
+      {/* Poin 1: Leave lobby confirmation popup */}
+      {showLeavePopup && (
+        <>
+          <div
+            onClick={() => setShowLeavePopup(false)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 300,
+              background: "rgba(0,0,0,0.7)",
+              backdropFilter: "blur(4px)",
+            }}
+          />
+          <div
+            style={{
+              position: "fixed",
+              top: "50%",
+              left: "50%",
+              transform: "translate(-50%,-50%)",
+              zIndex: 301,
+              width: "min(380px, 90vw)",
+              background: "var(--panel-bg)",
+              border: "1px solid rgba(255,82,82,0.3)",
+              borderRadius: 12,
+              overflow: "hidden",
+              boxShadow: "0 20px 50px rgba(0,0,0,0.6)",
+            }}
+          >
+            <div
+              style={{
+                height: 3,
+                background:
+                  "linear-gradient(90deg, transparent, #ff5252, transparent)",
+              }}
+            />
+            <div style={{ padding: "24px 22px", textAlign: "center" }}>
+              <div style={{ fontSize: 40, marginBottom: 12 }}>🚪</div>
+              <div
+                style={{
+                  fontFamily: "var(--display)",
+                  fontSize: "1.1rem",
+                  textTransform: "uppercase",
+                  letterSpacing: 1,
+                  marginBottom: 8,
+                }}
+              >
+                Leave Lobby?
+              </div>
+              <p
+                style={{
+                  fontSize: 13,
+                  color: "var(--ink-dim)",
+                  marginBottom: 20,
+                  lineHeight: 1.6,
+                }}
+              >
+                Leaving will cancel the lobby and notify your opponent. This
+                cannot be undone.
+              </p>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  onClick={() => setShowLeavePopup(false)}
+                  style={{
+                    flex: 1,
+                    padding: "11px",
+                    borderRadius: 8,
+                    border: "1px solid var(--border)",
+                    background: "transparent",
+                    color: "var(--ink-dim)",
+                    cursor: "pointer",
+                    fontFamily: "var(--display)",
+                    fontSize: 12,
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Stay
+                </button>
+                <button
+                  onClick={confirmLeave}
+                  style={{
+                    flex: 1,
+                    padding: "11px",
+                    borderRadius: 8,
+                    border: "none",
+                    background: "#ff5252",
+                    color: "#fff",
+                    cursor: "pointer",
+                    fontFamily: "var(--display)",
+                    fontWeight: 700,
+                    fontSize: 12,
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Leave & Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Poin 2: Surrender confirmation popup */}
+      {showSurrenderPopup && (
+        <>
+          <div
+            onClick={() => setShowSurrenderPopup(false)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 300,
+              background: "rgba(0,0,0,0.7)",
+              backdropFilter: "blur(4px)",
+            }}
+          />
+          <div
+            style={{
+              position: "fixed",
+              top: "50%",
+              left: "50%",
+              transform: "translate(-50%,-50%)",
+              zIndex: 301,
+              width: "min(380px, 90vw)",
+              background: "var(--panel-bg)",
+              border: "1px solid rgba(255,152,0,0.3)",
+              borderRadius: 12,
+              overflow: "hidden",
+              boxShadow: "0 20px 50px rgba(0,0,0,0.6)",
+            }}
+          >
+            <div
+              style={{
+                height: 3,
+                background:
+                  "linear-gradient(90deg, transparent, #ff9800, transparent)",
+              }}
+            />
+            <div style={{ padding: "24px 22px", textAlign: "center" }}>
+              <div style={{ fontSize: 40, marginBottom: 12 }}>🏳️</div>
+              <div
+                style={{
+                  fontFamily: "var(--display)",
+                  fontSize: "1.1rem",
+                  textTransform: "uppercase",
+                  letterSpacing: 1,
+                  marginBottom: 8,
+                }}
+              >
+                Surrender?
+              </div>
+              <p
+                style={{
+                  fontSize: 13,
+                  color: "var(--ink-dim)",
+                  marginBottom: 20,
+                  lineHeight: 1.6,
+                }}
+              >
+                Leaving during a match counts as a surrender. Your opponent will
+                be awarded the win.
+              </p>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  onClick={() => setShowSurrenderPopup(false)}
+                  style={{
+                    flex: 1,
+                    padding: "11px",
+                    borderRadius: 8,
+                    border: "1px solid var(--border)",
+                    background: "transparent",
+                    color: "var(--ink-dim)",
+                    cursor: "pointer",
+                    fontFamily: "var(--display)",
+                    fontSize: 12,
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Keep Playing
+                </button>
+                <button
+                  onClick={confirmSurrender}
+                  disabled={surrendering}
+                  style={{
+                    flex: 1,
+                    padding: "11px",
+                    borderRadius: 8,
+                    border: "none",
+                    background: "#ff9800",
+                    color: "#0a0d12",
+                    cursor: surrendering ? "not-allowed" : "pointer",
+                    fontFamily: "var(--display)",
+                    fontWeight: 700,
+                    fontSize: 12,
+                    textTransform: "uppercase",
+                  }}
+                >
+                  {surrendering ? "Surrendering..." : "Surrender"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
       {expPopup && (
         <FriendlyExpPopup
           result={expPopup.result}
@@ -1757,10 +2024,12 @@ function TeamChip({
   team,
   ready,
   waiting,
+  matching,
 }: {
   team: { name: string; logoSvg: string | null; jerseyColor: string };
   ready?: boolean;
   waiting?: boolean;
+  matching?: boolean; // true when match has started — shows "⚽ Matching" instead of Ready
 }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -1803,7 +2072,7 @@ function TeamChip({
               color: ready ? "var(--ws-green-bright)" : "var(--ink-dim)",
             }}
           >
-            {ready ? "✓ Ready" : "Not ready"}
+            {matching ? "⚽ Matching" : ready ? "✓ Ready" : "Not ready"}
           </div>
         )}
       </div>
