@@ -359,3 +359,17 @@ model BoostLog {
   @@index([playerId])
   @@index([wallet])
 }
+
+// ─── Tactics Templates ────────────────────────────────────────────────────────
+// User-saved tactics templates for quick apply in Friendly match lobby.
+// Multiple templates per user, each with a name, formation, and slot assignments.
+model TacticsTemplate {
+  id            String   @id @default(cuid())
+  walletAddress String
+  name          String   // e.g. "4-3-3 Menyerang", "Parkir Bus"
+  formation     String   // e.g. "4-3-3"
+  slots         Json     // Array of { slotIndex: number, playerId: string }
+  createdAt     DateTime @default(now())
+
+  @@index([walletAddress])
+}

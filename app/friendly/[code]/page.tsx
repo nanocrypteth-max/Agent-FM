@@ -83,6 +83,10 @@ function FriendlyRoom() {
   );
   const [lineupConfirmed, setLineupConfirmed] = useState(false);
   const [importingTactics, setImportingTactics] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [templates, setTemplates] = useState<
+    Array<{ id: string; name: string; formation: string; slots: any[] }>
+  >([]);
   // Track opponent confirmation status for poin 4
   const [opponentConfirmed, setOpponentConfirmed] = useState(false);
   const [opponentFormation, setOpponentFormation] = useState<string | null>(
@@ -310,34 +314,29 @@ function FriendlyRoom() {
     });
   }
 
-  // Import saved tactics from Squad page
-  async function importSavedTactics() {
+  // Load templates list and show modal
+  async function openImportModal() {
     if (!walletAddress) return;
     setImportingTactics(true);
     try {
-      const res = await fetch(`/api/squad?wallet=${walletAddress}`);
+      const res = await fetch(`/api/tactics?wallet=${walletAddress}`);
       const data = await res.json();
-      if (!res.ok) return;
-
-      const { team, players } = data;
-      if (!team?.formation) return;
-
-      // Apply saved formation
-      setSelectedFormation(team.formation);
-
-      // Apply saved slot assignments
-      const savedMap = new Map<number, string>();
-      (players as SquadPlayer[]).forEach((p) => {
-        if (p.slotIndex !== null && p.slotIndex !== undefined) {
-          savedMap.set(p.slotIndex, p.id);
-        }
-      });
-
-      if (savedMap.size >= 11) {
-        setSlotMap(savedMap);
-      }
+      if (res.ok) setTemplates(data.templates ?? []);
     } catch {}
     setImportingTactics(false);
+    setShowImportModal(true);
+  }
+
+  // Apply a selected template to the pitch
+  function applyTemplate(template: {
+    formation: string;
+    slots: Array<{ slotIndex: number; playerId: string }>;
+  }) {
+    setSelectedFormation(template.formation as any);
+    const map = new Map<number, string>();
+    template.slots.forEach((s) => map.set(s.slotIndex, s.playerId));
+    setSlotMap(map);
+    setShowImportModal(false);
   }
 
   async function markReady() {
@@ -608,11 +607,11 @@ function FriendlyRoom() {
                     flexWrap: "wrap",
                   }}
                 >
-                  {/* Import Saved Tactics button */}
+                  {/* Import Tactics — opens template picker modal */}
                   <button
-                    onClick={importSavedTactics}
+                    onClick={openImportModal}
                     disabled={importingTactics || lineupConfirmed}
-                    title="Import formation and lineup from your saved Squad tactics"
+                    title="Import a saved tactics template"
                     style={{
                       padding: "7px 12px",
                       borderRadius: 6,
@@ -636,8 +635,152 @@ function FriendlyRoom() {
                       flexShrink: 0,
                     }}
                   >
-                    {importingTactics ? "⏳ Importing..." : "📋 Import Tactics"}
+                    {importingTactics ? "⏳ Loading..." : "📋 Import Tactics"}
                   </button>
+
+                  {/* Import Tactics Modal */}
+                  {showImportModal && (
+                    <>
+                      <div
+                        onClick={() => setShowImportModal(false)}
+                        style={{
+                          position: "fixed",
+                          inset: 0,
+                          zIndex: 300,
+                          background: "rgba(0,0,0,0.6)",
+                          backdropFilter: "blur(4px)",
+                        }}
+                      />
+                      <div
+                        style={{
+                          position: "fixed",
+                          top: "50%",
+                          left: "50%",
+                          transform: "translate(-50%,-50%)",
+                          zIndex: 301,
+                          width: "min(420px, 90vw)",
+                          background: "var(--panel-bg)",
+                          border: "1px solid var(--border)",
+                          borderRadius: 12,
+                          overflow: "hidden",
+                          boxShadow: "0 20px 50px rgba(0,0,0,0.5)",
+                        }}
+                      >
+                        <div
+                          style={{
+                            padding: "16px 20px",
+                            borderBottom: "1px solid var(--border)",
+                            fontFamily: "var(--display)",
+                            fontSize: "0.95rem",
+                            textTransform: "uppercase",
+                            letterSpacing: 1,
+                          }}
+                        >
+                          📋 Choose Tactics Template
+                        </div>
+                        <div style={{ maxHeight: 360, overflowY: "auto" }}>
+                          {templates.length === 0 ? (
+                            <div
+                              style={{
+                                padding: 32,
+                                textAlign: "center",
+                                color: "var(--ink-dim)",
+                                fontSize: 13,
+                              }}
+                            >
+                              No saved templates yet.
+                              <br />
+                              <span style={{ fontSize: 11 }}>
+                                Go to Squad page → arrange lineup → click "💾
+                                Save Template"
+                              </span>
+                            </div>
+                          ) : (
+                            templates.map((t) => (
+                              <div
+                                key={t.id}
+                                onClick={() => applyTemplate(t)}
+                                style={{
+                                  padding: "14px 20px",
+                                  borderBottom: "1px solid var(--border)",
+                                  cursor: "pointer",
+                                  display: "flex",
+                                  justifyContent: "space-between",
+                                  alignItems: "center",
+                                  transition: "background 0.12s",
+                                }}
+                                onMouseEnter={(e) =>
+                                  (e.currentTarget.style.background =
+                                    "rgba(255,255,255,0.04)")
+                                }
+                                onMouseLeave={(e) =>
+                                  (e.currentTarget.style.background =
+                                    "transparent")
+                                }
+                              >
+                                <div>
+                                  <div
+                                    style={{
+                                      fontWeight: 600,
+                                      fontSize: 13,
+                                      marginBottom: 3,
+                                    }}
+                                  >
+                                    {t.name}
+                                  </div>
+                                  <div
+                                    style={{
+                                      fontSize: 11,
+                                      color: "var(--ink-dim)",
+                                    }}
+                                  >
+                                    {t.formation} · {t.slots.length} players
+                                  </div>
+                                </div>
+                                <div
+                                  style={{
+                                    fontSize: 11,
+                                    padding: "4px 12px",
+                                    borderRadius: 20,
+                                    background: "rgba(79,195,247,0.12)",
+                                    color: "#4fc3f7",
+                                    border: "1px solid rgba(79,195,247,0.3)",
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  Apply →
+                                </div>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                        <div
+                          style={{
+                            padding: "12px 20px",
+                            borderTop: "1px solid var(--border)",
+                          }}
+                        >
+                          <button
+                            onClick={() => setShowImportModal(false)}
+                            style={{
+                              width: "100%",
+                              padding: "9px",
+                              borderRadius: 6,
+                              border: "1px solid var(--border)",
+                              background: "transparent",
+                              color: "var(--ink-dim)",
+                              cursor: "pointer",
+                              fontFamily: "var(--display)",
+                              fontSize: 12,
+                              textTransform: "uppercase",
+                            }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  )}
 
                   <select
                     value={selectedFormation}

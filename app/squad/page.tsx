@@ -56,6 +56,10 @@ function SquadContent() {
   const [slots, setSlots] = useState<Map<number, string>>(new Map());
   const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
   const [saving, setSaving] = useState(false);
+  const [showSaveTemplate, setShowSaveTemplate] = useState(false);
+  const [templateName, setTemplateName] = useState("");
+  const [savingTemplate, setSavingTemplate] = useState(false);
+  const [templateMsg, setTemplateMsg] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
 
   useEffect(() => {
@@ -116,6 +120,37 @@ function SquadContent() {
     const data = await res.json();
     setSaving(false);
     setMsg(res.ok ? "✓ Formation saved!" : data.error);
+  }
+
+  async function saveAsTemplate() {
+    if (!walletAddress || !templateName.trim() || slots.size !== 11) return;
+    setSavingTemplate(true);
+    setTemplateMsg(null);
+    const slotsArray = Array.from(slots.entries()).map(
+      ([slotIndex, playerId]) => ({ slotIndex, playerId }),
+    );
+    const res = await fetch("/api/tactics", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        wallet: walletAddress,
+        name: templateName,
+        formation,
+        slots: slotsArray,
+      }),
+    });
+    const data = await res.json();
+    setSavingTemplate(false);
+    if (res.ok) {
+      setTemplateMsg("✓ Template saved!");
+      setTemplateName("");
+      setTimeout(() => {
+        setShowSaveTemplate(false);
+        setTemplateMsg(null);
+      }, 1200);
+    } else {
+      setTemplateMsg(data.error);
+    }
   }
 
   const [showPresets, setShowPresets] = useState(false);
@@ -357,8 +392,155 @@ function SquadContent() {
           >
             {saving ? "Saving..." : `Save (${slots.size}/11)`}
           </button>
+
+          {/* Save as Template button */}
+          <button
+            onClick={() => {
+              setShowSaveTemplate(true);
+              setTemplateMsg(null);
+            }}
+            disabled={slots.size !== 11}
+            style={{
+              padding: "8px 14px",
+              borderRadius: 6,
+              border: "1px solid rgba(79,195,247,0.4)",
+              background:
+                slots.size === 11 ? "rgba(79,195,247,0.08)" : "transparent",
+              color: slots.size === 11 ? "#4fc3f7" : "var(--ink-dim)",
+              fontFamily: "var(--display)",
+              fontSize: 12,
+              textTransform: "uppercase",
+              letterSpacing: 1,
+              cursor: slots.size === 11 ? "pointer" : "not-allowed",
+            }}
+          >
+            💾 Save Template
+          </button>
         </div>
       </div>
+
+      {/* Save as Template Modal */}
+      {showSaveTemplate && (
+        <>
+          <div
+            onClick={() => setShowSaveTemplate(false)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 300,
+              background: "rgba(0,0,0,0.6)",
+              backdropFilter: "blur(4px)",
+            }}
+          />
+          <div
+            style={{
+              position: "fixed",
+              top: "50%",
+              left: "50%",
+              transform: "translate(-50%,-50%)",
+              zIndex: 301,
+              width: "min(400px, 90vw)",
+              background: "var(--panel-bg)",
+              border: "1px solid var(--border)",
+              borderRadius: 12,
+              padding: 24,
+              boxShadow: "0 20px 50px rgba(0,0,0,0.5)",
+            }}
+          >
+            <div
+              style={{
+                fontFamily: "var(--display)",
+                fontSize: "1rem",
+                textTransform: "uppercase",
+                letterSpacing: 1,
+                marginBottom: 16,
+              }}
+            >
+              💾 Save Tactics Template
+            </div>
+            <div
+              style={{
+                fontSize: 12,
+                color: "var(--ink-dim)",
+                marginBottom: 12,
+              }}
+            >
+              Formation:{" "}
+              <strong style={{ color: "var(--ws-gold)" }}>{formation}</strong> ·{" "}
+              {slots.size}/11 players
+            </div>
+            <input
+              type="text"
+              placeholder='e.g. "4-3-3 Menyerang" or "Parkir Bus"'
+              value={templateName}
+              onChange={(e) => setTemplateName(e.target.value.slice(0, 30))}
+              onKeyDown={(e) => e.key === "Enter" && saveAsTemplate()}
+              style={{
+                width: "100%",
+                padding: "10px 12px",
+                borderRadius: 6,
+                border: "1px solid var(--border)",
+                background: "var(--panel-bg)",
+                color: "var(--ink)",
+                fontSize: 13,
+                marginBottom: 12,
+                boxSizing: "border-box",
+              }}
+            />
+            {templateMsg && (
+              <div
+                style={{
+                  fontSize: 12,
+                  marginBottom: 10,
+                  color: templateMsg.startsWith("✓")
+                    ? "var(--ws-green-bright)"
+                    : "#ff5252",
+                }}
+              >
+                {templateMsg}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                onClick={() => setShowSaveTemplate(false)}
+                style={{
+                  flex: 1,
+                  padding: "10px",
+                  borderRadius: 6,
+                  border: "1px solid var(--border)",
+                  background: "transparent",
+                  color: "var(--ink-dim)",
+                  cursor: "pointer",
+                  fontFamily: "var(--display)",
+                  fontSize: 12,
+                  textTransform: "uppercase",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveAsTemplate}
+                disabled={savingTemplate || !templateName.trim()}
+                style={{
+                  flex: 2,
+                  padding: "10px",
+                  borderRadius: 6,
+                  border: "none",
+                  background: templateName.trim() ? "#4fc3f7" : "var(--border)",
+                  color: templateName.trim() ? "#0a0d12" : "var(--ink-dim)",
+                  cursor: templateName.trim() ? "pointer" : "not-allowed",
+                  fontFamily: "var(--display)",
+                  fontWeight: 700,
+                  fontSize: 12,
+                  textTransform: "uppercase",
+                }}
+              >
+                {savingTemplate ? "Saving..." : "💾 Save Template"}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
 
       {msg && (
         <div
