@@ -85,10 +85,14 @@ function MatchContent() {
   const router = useRouter();
   const fixtureId = params.id as string;
   const { walletAddress } = useAuth();
+  const walletRef = useRef<string | null>(null);
 
   // Expose wallet to window so the FULL_TIME handler can access it
   useEffect(() => {
-    if (walletAddress) (window as any).__agentfm_wallet = walletAddress;
+    if (walletAddress) {
+      (window as any).__agentfm_wallet = walletAddress;
+      walletRef.current = walletAddress;
+    }
   }, [walletAddress]);
 
   const [data, setData] = useState<FixtureData | null>(null);
@@ -164,7 +168,7 @@ function MatchContent() {
           } else {
             // AUTO-CONFIRM: Try to build tactics from saved squad formation
             const squadData = await fetch(
-              `/api/squad?wallet=${(window as any).__agentfm_wallet ?? ""}`,
+              `/api/squad?wallet=${walletRef.current ?? (window as any).__agentfm_wallet ?? ""}`,
             );
             if (squadData.ok) {
               const { players, team } = await squadData.json();
@@ -215,6 +219,16 @@ function MatchContent() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fixtureId]); // only re-run when fixture changes, not on every load() reference change
+
+  // Re-run load when wallet becomes available (handles race condition on first mount)
+  const walletLoadedRef = useRef(false);
+  useEffect(() => {
+    if (walletAddress && !walletLoadedRef.current) {
+      walletLoadedRef.current = true;
+      load();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [walletAddress]);
 
   async function handleSimulate() {
     setSimulating(true);
