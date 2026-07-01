@@ -540,9 +540,11 @@ function MatchContent() {
           display: "grid",
           gridTemplateColumns: "1fr 320px",
           gap: 12,
+          // alignItems stretch = right panel height matches pitch panel height
           alignItems: "stretch",
         }}
       >
+        {/* LEFT: Pitch panel — height determined by canvas (JS: width * 68/105) */}
         <div
           className="panel"
           style={{
@@ -551,9 +553,8 @@ function MatchContent() {
             flexDirection: "column",
             gap: 10,
             position: "relative",
-            // Pitch canvas sizes itself via JS (aspect ratio 68/105).
-            // We do NOT set explicit height here — pitch panel height is
-            // determined by the canvas, which is what we want right panel to match.
+            // overflow hidden = canvas cannot push panel taller than its natural size
+            overflow: "hidden",
           }}
         >
           {goalFlash > 0 && <div key={goalFlash} className="ws-goal-flash" />}
@@ -567,6 +568,7 @@ function MatchContent() {
               textTransform: "uppercase",
               letterSpacing: 1.5,
               color: "var(--ink-dim)",
+              flexShrink: 0,
             }}
           >
             <span>2D Match View</span>
@@ -583,30 +585,29 @@ function MatchContent() {
               {matchOver ? "FULL TIME" : "LIVE"}
             </span>
           </div>
-          <PitchView
-            events={events}
-            homeStartingXI={data.homeTactics!.startingXI}
-            awayStartingXI={data.awayTactics!.startingXI}
-            homeFormationSlots={homeSlots}
-            awayFormationSlots={awaySlots}
-            speed={speed}
-            onMinuteChange={handleMinuteChange}
-            paused={matchOver || pitchPaused}
-          />
+          {/* PitchView wrapper: flex:1 so canvas fills remaining pitch panel height */}
+          <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
+            <PitchView
+              events={events}
+              homeStartingXI={data.homeTactics!.startingXI}
+              awayStartingXI={data.awayTactics!.startingXI}
+              homeFormationSlots={homeSlots}
+              awayFormationSlots={awaySlots}
+              speed={speed}
+              onMinuteChange={handleMinuteChange}
+              paused={matchOver || pitchPaused}
+            />
+          </div>
         </div>
 
-        {/* Commentary + stats — right panel */}
+        {/* RIGHT: Commentary panel — height:100% = pitch panel height via grid stretch */}
         <div
           className="panel"
           style={{
             display: "flex",
             flexDirection: "column",
-            overflow: "hidden",
-            // height 100% = height of grid cell = height of pitch panel (tallest sibling)
-            // overflow hidden prevents right panel from pushing grid row taller than pitch
-            height: "100%",
-            // Safety: never taller than pitch aspect ratio at any viewport
-            maxHeight: "calc((100vw - 332px - 48px) * 68 / 105 + 56px)",
+            overflow: "hidden", // critical: prevents this panel from growing beyond pitch
+            height: "100%", // fills grid cell height = pitch panel height
           }}
         >
           <div
