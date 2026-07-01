@@ -130,105 +130,104 @@ function MatchContent() {
     return () => stopAmbience();
   }, [stopAmbience]);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/fixtures/${fixtureId}`);
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "Failed to load fixture");
-      setData(json);
+  const load = useCallback(
+    async (overrideWallet?: string) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch(`/api/fixtures/${fixtureId}`);
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error ?? "Failed to load fixture");
+        setData(json);
 
-      // For already-simulated matches: show results immediately, no animation replay.
-      // Setting matchOver=true causes PitchView paused=true so it never starts consuming events.
-      // The feed is pre-built from stored events so commentary shows correctly without looping.
-      if (json.simulated && json.events?.length > 0) {
-        setLiveScore({ home: json.homeScore ?? 0, away: json.awayScore ?? 0 });
-        setLiveMinute(90);
-        setMatchOver(true); // immediately paused — no replay loop
-        // Feed: reverse so newest events at top of commentary
-        setFeed((json.events as MatchEvent[]).slice().reverse());
-      }
+        // For already-simulated matches: show results immediately, no animation replay.
+        // Setting matchOver=true causes PitchView paused=true so it never starts consuming events.
+        // The feed is pre-built from stored events so commentary shows correctly without looping.
+        if (json.simulated && json.events?.length > 0) {
+          setLiveScore({
+            home: json.homeScore ?? 0,
+            away: json.awayScore ?? 0,
+          });
+          setLiveMinute(90);
+          setMatchOver(true); // immediately paused — no replay loop
+          // Feed: reverse so newest events at top of commentary
+          setFeed((json.events as MatchEvent[]).slice().reverse());
+        }
 
-      if (!json.simulated) {
-        const userTeam = json.homeTeam.isUserControlled
-          ? json.homeTeam
-          : json.awayTeam.isUserControlled
-            ? json.awayTeam
-            : null;
-        if (userTeam) {
-          const squadRes = await fetch(`/api/teams/${userTeam.id}/squad`);
-          const squadJson = await squadRes.json();
-          setSquad(squadJson.players);
+        if (!json.simulated) {
+          const userTeam = json.homeTeam.isUserControlled
+            ? json.homeTeam
+            : json.awayTeam.isUserControlled
+              ? json.awayTeam
+              : null;
+          if (userTeam) {
+            const squadRes = await fetch(`/api/teams/${userTeam.id}/squad`);
+            const squadJson = await squadRes.json();
+            setSquad(squadJson.players);
 
-          // Check if tactics already submitted for this fixture
-          const tacticsRes = await fetch(`/api/fixtures/${fixtureId}/tactics`);
-          if (tacticsRes.ok) {
-            setTacticsSubmitted(true);
-          } else {
-            // AUTO-CONFIRM: Try to build tactics from saved squad formation
-            const squadData = await fetch(
-              `/api/squad?wallet=${walletRef.current ?? (window as any).__agentfm_wallet ?? ""}`,
+            // Check if tactics already submitted for this fixture
+            const tacticsRes = await fetch(
+              `/api/fixtures/${fixtureId}/tactics`,
             );
-            if (squadData.ok) {
-              const { players, team } = await squadData.json();
-              // Players with a slotIndex set = starting XI
-              const startingXI = players
-                .filter(
-                  (p: any) => p.slotIndex !== null && p.slotIndex !== undefined,
-                )
-                .sort((a: any, b: any) => a.slotIndex - b.slotIndex)
-                .map((p: any) => p.id);
+            if (tacticsRes.ok) {
+              setTacticsSubmitted(true);
+            } else {
+              // AUTO-CONFIRM: Try to build tactics from saved squad formation
+              const squadData = await fetch(
+                `/api/squad?wallet=${overrideWallet ?? walletRef.current ?? (window as any).__agentfm_wallet ?? ""}`,
+              );
+              if (squadData.ok) {
+                const { players, team } = await squadData.json();
+                // Players with a slotIndex set = starting XI
+                const startingXI = players
+                  .filter(
+                    (p: any) =>
+                      p.slotIndex !== null && p.slotIndex !== undefined,
+                  )
+                  .sort((a: any, b: any) => a.slotIndex - b.slotIndex)
+                  .map((p: any) => p.id);
 
-              if (startingXI.length === 11) {
-                // Auto-submit tactics from squad formation
-                const autoSubmit = await fetch(
-                  `/api/fixtures/${fixtureId}/tactics`,
-                  {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                      formation: team.formation ?? "4-4-2",
-                      mentality: "BALANCED",
-                      startingXI,
-                      instructions: {
-                        pressing: "MEDIUM",
-                        tempo: "NORMAL",
-                        width: "NORMAL",
-                      },
-                    }),
-                  },
-                );
-                setTacticsSubmitted(autoSubmit.ok);
-                if (autoSubmit.ok) {
-                  setError(null); // clear any prior error
+                if (startingXI.length === 11) {
+                  // Auto-submit tactics from squad formation
+                  const autoSubmit = await fetch(
+                    `/api/fixtures/${fixtureId}/tactics`,
+                    {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        formation: team.formation ?? "4-4-2",
+                        mentality: "BALANCED",
+                        startingXI,
+                        instructions: {
+                          pressing: "MEDIUM",
+                          tempo: "NORMAL",
+                          width: "NORMAL",
+                        },
+                      }),
+                    },
+                  );
+                  setTacticsSubmitted(autoSubmit.ok);
+                  if (autoSubmit.ok) {
+                    setError(null); // clear any prior error
+                  }
                 }
               }
             }
           }
         }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Unknown error");
+      } finally {
+        setLoading(false);
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
-    } finally {
-      setLoading(false);
-    }
-  }, [fixtureId]);
+    },
+    [fixtureId],
+  );
 
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fixtureId]); // only re-run when fixture changes, not on every load() reference change
-
-  // Re-run load when wallet becomes available (handles race condition on first mount)
-  const walletLoadedRef = useRef(false);
-  useEffect(() => {
-    if (walletAddress && !walletLoadedRef.current) {
-      walletLoadedRef.current = true;
-      load();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [walletAddress]);
 
   async function handleSimulate() {
     setSimulating(true);
@@ -340,16 +339,17 @@ function MatchContent() {
     if (!el) return;
     let rafId: number;
     const ro = new ResizeObserver(([entry]) => {
-      rafId = requestAnimationFrame(() => {
+      // setTimeout 0 ensures we're outside React's render cycle (fixes error #310)
+      rafId = window.setTimeout(() => {
         setPitchPanelHeight(
           entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height,
         );
-      });
+      }, 0) as unknown as number;
     });
     ro.observe(el);
     return () => {
       ro.disconnect();
-      cancelAnimationFrame(rafId);
+      clearTimeout(rafId);
     };
   }, []);
 
