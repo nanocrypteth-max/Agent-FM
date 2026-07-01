@@ -663,125 +663,135 @@ function MatchContent() {
               />
             </div>
           )}
-        </div>
 
-        {/* Mini stats — inside right panel */}
-        <div style={{ borderTop: "1px solid var(--border)", padding: 12 }}>
+          {/* Mini stats — fixed footer inside right panel, does not shrink commentary */}
           <div
             style={{
-              fontFamily: "var(--display)",
-              fontSize: 10,
-              textTransform: "uppercase",
-              letterSpacing: 1,
-              color: "var(--ink-dim)",
-              marginBottom: 8,
+              borderTop: "1px solid var(--border)",
+              padding: 12,
+              flexShrink: 0,
             }}
           >
-            Match Stats
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {[
-              {
-                label: "Shots",
-                home: feed.filter(
-                  (e) =>
-                    e.team === "HOME" &&
-                    (e.type === "SHOT" || e.type === "GOAL"),
-                ).length,
-                away: feed.filter(
-                  (e) =>
-                    e.team === "AWAY" &&
-                    (e.type === "SHOT" || e.type === "GOAL"),
-                ).length,
-              },
-              {
-                label: "Saves",
-                home: feed.filter((e) => e.team === "HOME" && e.type === "SAVE")
-                  .length,
-                away: feed.filter((e) => e.team === "AWAY" && e.type === "SAVE")
-                  .length,
-              },
-              {
-                label: "Fouls",
-                home: feed.filter((e) => e.team === "HOME" && e.type === "FOUL")
-                  .length,
-                away: feed.filter((e) => e.team === "AWAY" && e.type === "FOUL")
-                  .length,
-              },
-              {
-                label: "Yellows",
-                home: feed.filter(
-                  (e) => e.team === "HOME" && e.type === "YELLOW_CARD",
-                ).length,
-                away: feed.filter(
-                  (e) => e.team === "AWAY" && e.type === "YELLOW_CARD",
-                ).length,
-              },
-            ].map((s) => (
-              <div key={s.label}>
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    fontSize: 10,
-                    marginBottom: 2,
-                  }}
-                >
-                  <span
-                    style={{
-                      fontFamily: "var(--mono)",
-                      color: "var(--home-color)",
-                      fontWeight: 700,
-                    }}
-                  >
-                    {s.home}
-                  </span>
-                  <span
-                    style={{
-                      fontSize: 9,
-                      color: "var(--ink-dim)",
-                      textTransform: "uppercase",
-                      letterSpacing: 0.5,
-                    }}
-                  >
-                    {s.label}
-                  </span>
-                  <span
-                    style={{
-                      fontFamily: "var(--mono)",
-                      color: "var(--away-color)",
-                      fontWeight: 700,
-                    }}
-                  >
-                    {s.away}
-                  </span>
-                </div>
-                <div
-                  style={{
-                    height: 3,
-                    background: "var(--border)",
-                    borderRadius: 2,
-                    overflow: "hidden",
-                    display: "flex",
-                  }}
-                >
+            <div
+              style={{
+                fontFamily: "var(--display)",
+                fontSize: 10,
+                textTransform: "uppercase",
+                letterSpacing: 1,
+                color: "var(--ink-dim)",
+                marginBottom: 8,
+              }}
+            >
+              Match Stats
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {[
+                {
+                  label: "Shots",
+                  home: feed.filter(
+                    (e) =>
+                      e.team === "HOME" &&
+                      (e.type === "SHOT" || e.type === "GOAL"),
+                  ).length,
+                  away: feed.filter(
+                    (e) =>
+                      e.team === "AWAY" &&
+                      (e.type === "SHOT" || e.type === "GOAL"),
+                  ).length,
+                },
+                {
+                  label: "Saves",
+                  home: feed.filter(
+                    (e) => e.team === "HOME" && e.type === "SAVE",
+                  ).length,
+                  away: feed.filter(
+                    (e) => e.team === "AWAY" && e.type === "SAVE",
+                  ).length,
+                },
+                {
+                  label: "Fouls",
+                  home: feed.filter(
+                    (e) => e.team === "HOME" && e.type === "FOUL",
+                  ).length,
+                  away: feed.filter(
+                    (e) => e.team === "AWAY" && e.type === "FOUL",
+                  ).length,
+                },
+                {
+                  label: "Yellows",
+                  home: feed.filter(
+                    (e) => e.team === "HOME" && e.type === "YELLOW_CARD",
+                  ).length,
+                  away: feed.filter(
+                    (e) => e.team === "AWAY" && e.type === "YELLOW_CARD",
+                  ).length,
+                },
+              ].map((s) => (
+                <div key={s.label}>
                   <div
                     style={{
-                      width: `${(s.home / Math.max(s.home + s.away, 1)) * 100}%`,
-                      background: "var(--home-color)",
-                      transition: "width 0.4s",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      fontSize: 10,
+                      marginBottom: 2,
                     }}
-                  />
+                  >
+                    <span
+                      style={{
+                        fontFamily: "var(--mono)",
+                        color: "var(--home-color)",
+                        fontWeight: 700,
+                      }}
+                    >
+                      {s.home}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 9,
+                        color: "var(--ink-dim)",
+                        textTransform: "uppercase",
+                        letterSpacing: 0.5,
+                      }}
+                    >
+                      {s.label}
+                    </span>
+                    <span
+                      style={{
+                        fontFamily: "var(--mono)",
+                        color: "var(--away-color)",
+                        fontWeight: 700,
+                      }}
+                    >
+                      {s.away}
+                    </span>
+                  </div>
                   <div
                     style={{
-                      width: `${(s.away / Math.max(s.home + s.away, 1)) * 100}%`,
-                      background: "var(--away-color)",
-                      transition: "width 0.4s",
+                      height: 3,
+                      background: "var(--border)",
+                      borderRadius: 2,
+                      overflow: "hidden",
+                      display: "flex",
                     }}
-                  />
+                  >
+                    <div
+                      style={{
+                        width: `${(s.home / Math.max(s.home + s.away, 1)) * 100}%`,
+                        background: "var(--home-color)",
+                        transition: "width 0.4s",
+                      }}
+                    />
+                    <div
+                      style={{
+                        width: `${(s.away / Math.max(s.home + s.away, 1)) * 100}%`,
+                        background: "var(--away-color)",
+                        transition: "width 0.4s",
+                      }}
+                    />
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         </div>
       </div>
