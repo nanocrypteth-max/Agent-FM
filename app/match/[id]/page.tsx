@@ -590,6 +590,7 @@ function MatchContent() {
             display: "flex",
             flexDirection: "column",
             overflow: "hidden",
+            height: "100%" /* stretch to match pitch height via grid */,
           }}
         >
           <div
