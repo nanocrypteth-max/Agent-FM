@@ -527,7 +527,12 @@ function MatchContent() {
 
       {/* Pitch — horizontal layout: pitch left (wider), commentary right */}
       <div
-        style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 12 }}
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 320px",
+          gap: 12,
+          alignItems: "stretch",
+        }}
       >
         <div
           className="panel"
@@ -608,10 +613,10 @@ function MatchContent() {
                 flex: 1,
                 overflowY: "auto",
                 padding: 8,
-                maxHeight: 320,
                 display: "flex",
                 flexDirection: "column",
                 gap: 2,
+                minHeight: 0 /* critical: allows flex child to scroll */,
               }}
             >
               {feed.filter((ev) => !COMMENTARY_SKIP.has(ev.type)).length ===
@@ -640,7 +645,7 @@ function MatchContent() {
                 flex: 1,
                 overflowY: "auto",
                 padding: 14,
-                maxHeight: 320,
+                minHeight: 0,
               }}
             >
               <DecisionCard
