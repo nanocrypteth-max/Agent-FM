@@ -108,6 +108,8 @@ function MatchContent() {
   const [halfTimeFormation, setHalfTimeFormation] = useState<string>("4-4-2");
   const [pitchPaused, setPitchPaused] = useState(false); // paused during half-time modal
   const isUserInMatchRef = useRef(false);
+  const pitchPanelRef = useRef<HTMLDivElement>(null);
+  const [pitchPanelHeight, setPitchPanelHeight] = useState<number>(0);
   const [expPopup, setExpPopup] = useState<{
     result: "WIN" | "DRAW" | "LOSS";
     expGained: number;
@@ -313,6 +315,19 @@ function MatchContent() {
       : null;
   // Keep ref updated so the event handler can check without stale closure
   isUserInMatchRef.current = !!userTeam;
+
+  // Track pitch panel height — commentary panel maxHeight set to match exactly
+  useEffect(() => {
+    const el = pitchPanelRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => {
+      setPitchPanelHeight(
+        entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height + 24,
+      );
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   // ---- PRE-MATCH ----
   if (!data.simulated) {
@@ -537,6 +552,7 @@ function MatchContent() {
         }}
       >
         <div
+          ref={pitchPanelRef}
           className="panel"
           style={{
             padding: 12,
@@ -592,10 +608,8 @@ function MatchContent() {
             display: "flex",
             flexDirection: "column",
             overflow: "hidden",
-            // maxHeight matches pitch canvas height: pitch col is ~(100% - 332px),
-            // pitch height = width * (68/105). Approximated with a safe value.
-            // The canvas itself sizes via JS so we use a viewport-relative calc.
-            maxHeight: "calc((100vw - 332px - 48px) * 68 / 105 + 44px)",
+            // Exact pitch panel height measured via ResizeObserver — no CSS approximation
+            maxHeight: pitchPanelHeight > 0 ? pitchPanelHeight : undefined,
           }}
         >
           <div
