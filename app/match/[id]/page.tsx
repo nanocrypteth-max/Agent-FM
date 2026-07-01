@@ -316,17 +316,24 @@ function MatchContent() {
   // Keep ref updated so the event handler can check without stale closure
   isUserInMatchRef.current = !!userTeam;
 
-  // Track pitch panel height — commentary panel maxHeight set to match exactly
+  // Track pitch panel height — commentary maxHeight matches pitch exactly.
+  // requestAnimationFrame prevents React error #310 (setState during render).
   useEffect(() => {
     const el = pitchPanelRef.current;
     if (!el) return;
+    let rafId: number;
     const ro = new ResizeObserver(([entry]) => {
-      setPitchPanelHeight(
-        entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height + 24,
-      );
+      rafId = requestAnimationFrame(() => {
+        setPitchPanelHeight(
+          entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height,
+        );
+      });
     });
     ro.observe(el);
-    return () => ro.disconnect();
+    return () => {
+      ro.disconnect();
+      cancelAnimationFrame(rafId);
+    };
   }, []);
 
   // ---- PRE-MATCH ----
