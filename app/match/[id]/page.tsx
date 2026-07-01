@@ -533,7 +533,7 @@ function MatchContent() {
           display: "grid",
           gridTemplateColumns: "1fr 320px",
           gap: 12,
-          alignItems: "stretch",
+          alignItems: "start", // each column only as tall as its content
         }}
       >
         <div
@@ -592,7 +592,10 @@ function MatchContent() {
             display: "flex",
             flexDirection: "column",
             overflow: "hidden",
-            height: "100%" /* stretch to match pitch height via grid */,
+            // maxHeight matches pitch canvas height: pitch col is ~(100% - 332px),
+            // pitch height = width * (68/105). Approximated with a safe value.
+            // The canvas itself sizes via JS so we use a viewport-relative calc.
+            maxHeight: "calc((100vw - 332px - 48px) * 68 / 105 + 44px)",
           }}
         >
           <div
