@@ -218,16 +218,6 @@ function MatchContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fixtureId]); // only re-run when fixture changes, not on every load() reference change
 
-  // Re-run load when wallet becomes available (handles race condition on first mount)
-  const walletLoadedRef = useRef(false);
-  useEffect(() => {
-    if (walletAddress && !walletLoadedRef.current) {
-      walletLoadedRef.current = true;
-      load();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [walletAddress]);
-
   async function handleSimulate() {
     setSimulating(true);
     setError(null);
@@ -550,7 +540,7 @@ function MatchContent() {
           display: "grid",
           gridTemplateColumns: "1fr 320px",
           gap: 12,
-          alignItems: "start", // each column only as tall as its content
+          alignItems: "stretch", // both columns same height
         }}
       >
         <div
@@ -603,16 +593,14 @@ function MatchContent() {
         </div>
 
         {/* Commentary + stats — right panel */}
+        {/* height: 100% + overflow: hidden makes it exactly match pitch height via grid stretch */}
         <div
           className="panel"
           style={{
             display: "flex",
             flexDirection: "column",
             overflow: "hidden",
-            // Match pitch panel height via CSS: pitch col ≈ calc(100% - 332px), height = width * 68/105
-            // Container has max-width ~1400px with page padding. Using viewport-based calc.
-            maxHeight:
-              "min(calc((100vw - 332px - 96px) * 68 / 105 + 68px), 600px)",
+            height: "100%",
           }}
         >
           <div
