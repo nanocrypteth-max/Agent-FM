@@ -791,7 +791,7 @@ function SquadContent() {
                       />
                       <span
                         style={{
-                          fontSize: 7,
+                          fontSize: 10,
                           color: "#fff",
                           background: "rgba(0,0,0,0.7)",
                           padding: "1px 4px",
