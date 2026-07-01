@@ -540,7 +540,7 @@ function MatchContent() {
           display: "grid",
           gridTemplateColumns: "1fr 320px",
           gap: 12,
-          alignItems: "stretch", // both columns same height
+          alignItems: "stretch",
         }}
       >
         <div
@@ -551,6 +551,9 @@ function MatchContent() {
             flexDirection: "column",
             gap: 10,
             position: "relative",
+            // Pitch canvas sizes itself via JS (aspect ratio 68/105).
+            // We do NOT set explicit height here — pitch panel height is
+            // determined by the canvas, which is what we want right panel to match.
           }}
         >
           {goalFlash > 0 && <div key={goalFlash} className="ws-goal-flash" />}
@@ -593,14 +596,17 @@ function MatchContent() {
         </div>
 
         {/* Commentary + stats — right panel */}
-        {/* height: 100% + overflow: hidden makes it exactly match pitch height via grid stretch */}
         <div
           className="panel"
           style={{
             display: "flex",
             flexDirection: "column",
             overflow: "hidden",
+            // height 100% = height of grid cell = height of pitch panel (tallest sibling)
+            // overflow hidden prevents right panel from pushing grid row taller than pitch
             height: "100%",
+            // Safety: never taller than pitch aspect ratio at any viewport
+            maxHeight: "calc((100vw - 332px - 48px) * 68 / 105 + 56px)",
           }}
         >
           <div
