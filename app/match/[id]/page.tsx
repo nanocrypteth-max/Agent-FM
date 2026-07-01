@@ -106,6 +106,7 @@ function MatchContent() {
   const [goalFlash, setGoalFlash] = useState(0);
   const [showHalfTimeModal, setShowHalfTimeModal] = useState(false);
   const [halfTimeFormation, setHalfTimeFormation] = useState<string>("4-4-2");
+  const [pitchPaused, setPitchPaused] = useState(false); // paused during half-time modal
   const isUserInMatchRef = useRef(false);
   const [expPopup, setExpPopup] = useState<{
     result: "WIN" | "DRAW" | "LOSS";
@@ -249,6 +250,7 @@ function MatchContent() {
         }
         if (ev.type === "HALF_TIME" && isUserInMatchRef.current) {
           setShowHalfTimeModal(true);
+          setPitchPaused(true); // freeze pitch until user confirms tactics
         }
         if (ev.type === "FULL_TIME") {
           setMatchOver(true);
@@ -579,7 +581,7 @@ function MatchContent() {
             awayFormationSlots={awaySlots}
             speed={speed}
             onMinuteChange={handleMinuteChange}
-            paused={matchOver}
+            paused={matchOver || pitchPaused}
           />
         </div>
 
@@ -792,8 +794,12 @@ function MatchContent() {
           onConfirm={(formation) => {
             setHalfTimeFormation(formation);
             setShowHalfTimeModal(false);
+            setPitchPaused(false); // resume after confirm
           }}
-          onSkip={() => setShowHalfTimeModal(false)}
+          onSkip={() => {
+            setShowHalfTimeModal(false);
+            setPitchPaused(false);
+          }} // resume after timeout/skip
         />
       )}
 

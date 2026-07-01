@@ -275,16 +275,27 @@ export default function PitchView({
           now,
         );
 
-        // Idle movement: once a player's move-to-target transition has finished,
-        // give them a small sinusoidal wobble around their resting position so
-        // the pitch doesn't look frozen between events. Purely visual — does
-        // NOT mutate player.target, so event-driven movement is unaffected.
+        // Idle movement: layered sinusoids per player give organic, non-uniform motion.
+        // Three frequencies combined so no two players ever move in sync.
+        // Amplitude ~1.8 pitch-units gives visible but realistic jostling.
+        // Only active after transition completes so it doesn't fight event movement.
         const sinceTransition = now - player.transitionStart;
         if (sinceTransition > TRANSITION_DURATION_MS) {
           const t = now / 1000;
-          const idleX = Math.sin(t * 0.6 + player.idlePhase) * 0.6;
-          const idleY = Math.cos(t * 0.5 + player.idlePhase * 1.3) * 0.5;
-          pos = { x: pos.x + idleX, y: pos.y + idleY };
+          const ph = player.idlePhase;
+          // Layer 1: slow drift (positional shift, e.g. pressing/dropping off)
+          const driftX = Math.sin(t * 0.25 + ph) * 1.4;
+          const driftY = Math.cos(t * 0.2 + ph * 0.7) * 1.2;
+          // Layer 2: medium jog (player shuffling feet, adjusting position)
+          const jogX = Math.sin(t * 0.9 + ph * 1.5) * 0.8;
+          const jogY = Math.cos(t * 1.1 + ph * 0.9) * 0.7;
+          // Layer 3: quick micro-movement (weight shift, head movement)
+          const microX = Math.sin(t * 2.3 + ph * 2.1) * 0.25;
+          const microY = Math.cos(t * 2.7 + ph * 1.8) * 0.25;
+          pos = {
+            x: pos.x + driftX + jogX + microX,
+            y: pos.y + driftY + jogY + microY,
+          };
         }
 
         drawPlayer(
