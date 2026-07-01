@@ -64,7 +64,6 @@ export async function POST(
     );
   }
 
-  // Distributed lock — prevent double simulate
   const lockKey = KEYS.matchLock(lobby.id);
   const acquired = await redis.set(lockKey, "1", { nx: true, ex: 120 });
   if (!acquired)
@@ -110,7 +109,11 @@ export async function POST(
 
     const result = simulateMatch(simInput, lobby.id);
 
-    // Save result to DB first — client will fetch and replay locally (same as league match)
+    // Split events into first half (≤45) and second half (>45)
+    const firstHalf = result.events.filter((e) => e.minute <= 45);
+    const secondHalf = result.events.filter((e) => e.minute > 45);
+
+    // Save full result to DB
     const matchResult = await prisma.matchResult.create({
       data: {
         friendlyId: lobby.id,
@@ -127,7 +130,6 @@ export async function POST(
       data: { status: "COMPLETED" },
     });
 
-    // Award EXP (non-blocking)
     awardFriendlyExp({
       homeTeamId: lobby.hostTeamId,
       awayTeamId: lobby.guestTeam.id,
@@ -135,7 +137,6 @@ export async function POST(
       awayScore: result.awayScore,
     }).catch(() => {});
 
-    // EXP values for popup
     const EXP = { WIN: 25, DRAW: 10, LOSS: 5 };
     const homeRes =
       result.homeScore > result.awayScore
@@ -148,14 +149,17 @@ export async function POST(
 
     const channel = CHANNELS.friendly(code);
 
-    // Notify both clients: match is ready to replay.
-    // Include ALL data needed by client: startingXIs + events + result.
-    // Client fetches nothing — all data in this single Pusher event.
+    // Send first half + half-time pause signal.
+    // Client plays first half, then shows tactics modal.
+    // After both confirm (or 60s timeout), client calls /api/friendly/:code/halftime-resume
+    // which triggers second-half-ready with second half events.
     await pusher.trigger(channel, "match-ready", {
       matchResultId: matchResult.id,
       homeStartingXI: hostTactics.startingXI,
       awayStartingXI: guestTactics.startingXI,
-      events: result.events,
+      // Only first half events — second half sent after half-time tactics
+      events: firstHalf,
+      secondHalfEvents: secondHalf, // stored client-side, replayed after half-time
       homeScore: result.homeScore,
       awayScore: result.awayScore,
       homeExpGained: EXP[homeRes],

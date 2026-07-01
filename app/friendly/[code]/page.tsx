@@ -67,22 +67,28 @@ function FriendlyRoom() {
   const code = (params.code as string).toUpperCase();
   const { walletAddress, session } = useAuth();
 
-  // Lobby state
   const [lobby, setLobby] = useState<LobbyData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isReady, setIsReady] = useState(false);
   const [simulating, setSimulating] = useState(false);
-  // Poin 1: popup when leaving lobby mid-game
   const [showLeavePopup, setShowLeavePopup] = useState(false);
-  // Poin 2: popup when trying to navigate away during active match
   const [showSurrenderPopup, setShowSurrenderPopup] = useState(false);
   const [surrendering, setSurrendering] = useState(false);
 
-  // Lineup confirmation state (poin 3 & 4)
+  // Half-time tactics sync
+  const [secondHalfEvents, setSecondHalfEvents] = useState<MatchEvent[]>([]);
+  const [showHalfTimeModal, setShowHalfTimeModal] = useState(false);
+  const [halfTimeFormation, setHalfTimeFormation] = useState("4-4-2");
+  const [halfTimeCountdown, setHalfTimeCountdown] = useState(60);
+  const [opponentHalfTimeConfirmed, setOpponentHalfTimeConfirmed] =
+    useState(false);
+  const [pitchPaused, setPitchPaused] = useState(false);
+  const halfTimeTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const [myPlayers, setMyPlayers] = useState<SquadPlayer[]>([]);
   const [selectedFormation, setSelectedFormation] = useState("4-4-2");
-  const [slotMap, setSlotMap] = useState<Map<number, string>>(new Map()); // slotIdx → playerId
+  const [slotMap, setSlotMap] = useState<Map<number, string>>(new Map());
   const [selectedPlayer, setSelectedPlayer] = useState<SquadPlayer | null>(
     null,
   );
@@ -92,13 +98,11 @@ function FriendlyRoom() {
   const [templates, setTemplates] = useState<
     Array<{ id: string; name: string; formation: string; slots: any[] }>
   >([]);
-  // Track opponent confirmation status for poin 4
   const [opponentConfirmed, setOpponentConfirmed] = useState(false);
   const [opponentFormation, setOpponentFormation] = useState<string | null>(
     null,
   );
 
-  // Match playback state
   const [events, setEvents] = useState<MatchEvent[]>([]);
   const [liveScore, setLiveScore] = useState({ home: 0, away: 0 });
   const [liveMinute, setLiveMinute] = useState(0);
@@ -111,7 +115,6 @@ function FriendlyRoom() {
     expGained: number;
   } | null>(null);
 
-  // Refs to avoid stale closures in Pusher handlers
   const sessionRef = useRef(session);
   const lobbyRef = useRef(lobby);
   const walletRef = useRef(walletAddress);
@@ -137,7 +140,6 @@ function FriendlyRoom() {
     setLoading(false);
   }, [code]);
 
-  // Fetch own squad for lineup builder
   useEffect(() => {
     if (!walletAddress) return;
     fetch(`/api/squad?wallet=${walletAddress}`)
@@ -145,18 +147,14 @@ function FriendlyRoom() {
       .then((d) => {
         const players = d.players ?? [];
         setMyPlayers(players);
-        // Pre-fill formation slots from saved squad (slotIndex from DB)
         const map = new Map<number, string>();
         players.forEach((p: SquadPlayer) => {
-          if (p.slotIndex !== null && p.slotIndex !== undefined) {
+          if (p.slotIndex !== null && p.slotIndex !== undefined)
             map.set(p.slotIndex, p.id);
-          }
         });
-        // If user has saved a formation, use it; else auto-assign top 11 by rating
         if (map.size >= 11) {
           setSlotMap(map);
         } else {
-          // Auto-assign: GK first, then by position group order
           const autoMap = new Map<number, string>();
           const sorted = [...players].sort((a, b) => {
             const order: Record<string, number> = {
@@ -174,14 +172,11 @@ function FriendlyRoom() {
       .catch(() => {});
   }, [walletAddress]);
 
-  // Pusher setup
   useEffect(() => {
     const pk = process.env.NEXT_PUBLIC_PUSHER_KEY;
     const cluster = process.env.NEXT_PUBLIC_PUSHER_CLUSTER ?? "ap1";
     if (!pk) return;
-
     let pusher: any;
-
     import("pusher-js").then(({ default: Pusher }) => {
       pusher = new Pusher(pk, { cluster });
       const channel = pusher.subscribe(`friendly-${code}`);
@@ -197,23 +192,16 @@ function FriendlyRoom() {
       channel.bind("guest-ready", () => {
         setLobby((prev) => (prev ? { ...prev, guestReady: true } : prev));
       });
-
-      // Poin 4 — opponent confirms lineup
       channel.bind(
         "lineup-confirmed",
         (data: { teamId: string; isHost: boolean; formation: string }) => {
-          const myTeamId = sessionRef.current?.teamId;
-          if (data.teamId !== myTeamId) {
-            // This is the opponent's confirmation
+          if (data.teamId !== sessionRef.current?.teamId) {
             setOpponentConfirmed(true);
             setOpponentFormation(data.formation);
           }
         },
       );
-
-      // both-ready replaces match-start from /ready route
-      // host will call /simulate after receiving this
-      channel.bind("both-ready", (data: { friendlyId: string }) => {
+      channel.bind("both-ready", (_data: { friendlyId: string }) => {
         const amHost =
           sessionRef.current?.teamId === lobbyRef.current?.hostTeamId;
         if (amHost && walletRef.current) {
@@ -225,9 +213,6 @@ function FriendlyRoom() {
         }
       });
 
-      // match-ready: server has saved result to DB and sends ALL data in one event.
-      // Client replays events locally — same architecture as league match.
-      // This avoids race conditions with Pusher event ordering.
       channel.bind(
         "match-ready",
         (data: {
@@ -235,6 +220,7 @@ function FriendlyRoom() {
           homeStartingXI: string[];
           awayStartingXI: string[];
           events: MatchEvent[];
+          secondHalfEvents?: MatchEvent[];
           homeScore: number;
           awayScore: number;
           homeExpGained: number;
@@ -242,17 +228,12 @@ function FriendlyRoom() {
           homeTeamId: string;
           awayTeamId: string;
         }) => {
-          // 1. Init players in PitchView
           setHomeStartingXI(data.homeStartingXI);
           setAwayStartingXI(data.awayStartingXI);
-
-          // 2. Set all events — PitchView will consume them one by one with minuteGap timing
+          // First half events only; second half stored and appended after half-time modal
           setEvents(data.events);
-
-          // 3. Show pitch
+          setSecondHalfEvents(data.secondHalfEvents ?? []);
           setSimulating(true);
-
-          // 4. Store EXP info for popup (shown after FULL_TIME event is processed)
           const myTeamId = sessionRef.current?.teamId;
           if (myTeamId) {
             const isHome = myTeamId === data.homeTeamId;
@@ -261,23 +242,36 @@ function FriendlyRoom() {
             const result: "WIN" | "DRAW" | "LOSS" =
               myScore > oppScore ? "WIN" : myScore < oppScore ? "LOSS" : "DRAW";
             const expGained = isHome ? data.homeExpGained : data.awayExpGained;
-            // Delay popup until PitchView finishes — FULL_TIME triggers matchOver → EXP popup
-            // Store in ref to be used by handleMinuteChange
             pendingExpRef.current = { result, expGained };
           }
         },
       );
 
+      // Half-time: opponent confirmed their tactics
+      channel.bind("halftime-confirmed", (data: { teamId: string }) => {
+        if (data.teamId !== sessionRef.current?.teamId) {
+          setOpponentHalfTimeConfirmed(true);
+        }
+      });
+
+      // Half-time: both confirmed (or 60s timeout) — resume second half
+      channel.bind("second-half-start", () => {
+        setShowHalfTimeModal(false);
+        setPitchPaused(false);
+        if (halfTimeTimerRef.current) clearInterval(halfTimeTimerRef.current);
+        setSecondHalfEvents((prev) => {
+          setEvents((evs) => [...evs, ...prev]);
+          return [];
+        });
+      });
+
       channel.bind("lobby-expired", () => setError("Lobby has expired."));
       channel.bind("lobby-cancelled", () =>
         setError("Host cancelled the lobby."),
       );
-
-      // Poin 2: opponent surrendered — show win popup to the remaining player
       channel.bind("opponent-surrendered", (data: { winnerTeamId: string }) => {
         const myTeamId = sessionRef.current?.teamId;
         if (myTeamId === data.winnerTeamId) {
-          // I am the winner
           setTimeout(() => setExpPopup({ result: "WIN", expGained: 25 }), 500);
         }
         setMatchOver(true);
@@ -286,7 +280,6 @@ function FriendlyRoom() {
 
       return channel;
     });
-
     return () => {
       pusher?.unsubscribe(`friendly-${code}`);
       pusher?.disconnect();
@@ -318,7 +311,6 @@ function FriendlyRoom() {
 
   async function confirmLineup() {
     setLineupConfirmed(true);
-    // Notify opponent via Pusher (poin 4)
     await fetch(`/api/friendly/${code}/lineup`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -330,7 +322,6 @@ function FriendlyRoom() {
     });
   }
 
-  // Load templates list and show modal
   async function openImportModal() {
     if (!walletAddress) return;
     setImportingTactics(true);
@@ -343,7 +334,6 @@ function FriendlyRoom() {
     setShowImportModal(true);
   }
 
-  // Apply a selected template to the pitch
   function applyTemplate(template: {
     formation: string;
     slots: Array<{ slotIndex: number; playerId: string }>;
@@ -362,8 +352,18 @@ function FriendlyRoom() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ solanaWallet: walletAddress }),
     });
-    // Simulate is triggered by the "both-ready" Pusher event handler above
-    // Do NOT call simulate here — would cause double-call and 409
+  }
+
+  async function confirmHalfTimeTactics() {
+    if (halfTimeTimerRef.current) clearInterval(halfTimeTimerRef.current);
+    await fetch(`/api/friendly/${code}/halftime`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        solanaWallet: walletAddress,
+        formation: halfTimeFormation,
+      }),
+    }).catch(() => {});
   }
 
   async function cancelLobby() {
@@ -375,28 +375,24 @@ function FriendlyRoom() {
     router.push("/friendly");
   }
 
-  // Poin 1: back button — if lobby still active, show confirmation popup
   function handleBackButton() {
     if (matchOver) {
       router.push("/friendly");
       return;
     }
     if (showPitch) {
-      // Match in progress — surrender popup
       setShowSurrenderPopup(true);
     } else if (
       lobby &&
       lobby.status !== "COMPLETED" &&
       lobby.status !== "CANCELLED"
     ) {
-      // Still in lobby — leave popup
       setShowLeavePopup(true);
     } else {
       router.push("/friendly");
     }
   }
 
-  // Poin 1: confirm leave lobby
   async function confirmLeave() {
     await fetch(`/api/friendly/${code}`, {
       method: "DELETE",
@@ -406,7 +402,6 @@ function FriendlyRoom() {
     router.push("/friendly");
   }
 
-  // Poin 2: confirm surrender during active match
   async function confirmSurrender() {
     setSurrendering(true);
     await fetch(`/api/friendly/${code}`, {
@@ -433,9 +428,25 @@ function FriendlyRoom() {
               : { ...s, away: s.away + 1 },
           );
         }
+        if (ev.type === "HALF_TIME") {
+          // Pause pitch and show formation picker for second half
+          setPitchPaused(true);
+          setShowHalfTimeModal(true);
+          setHalfTimeCountdown(60);
+          setOpponentHalfTimeConfirmed(false);
+          let remaining = 60;
+          halfTimeTimerRef.current = setInterval(() => {
+            remaining--;
+            setHalfTimeCountdown(remaining);
+            if (remaining <= 0) {
+              if (halfTimeTimerRef.current)
+                clearInterval(halfTimeTimerRef.current);
+              fetch(`/api/friendly/${code}/halftime`).catch(() => {});
+            }
+          }, 1000);
+        }
         if (ev.type === "FULL_TIME") {
           setMatchOver(true);
-          // Show EXP popup 1.5s after full time
           if (pendingExpRef.current) {
             const exp = pendingExpRef.current;
             setTimeout(() => setExpPopup(exp), 1500);
@@ -443,9 +454,11 @@ function FriendlyRoom() {
           }
         }
       }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     },
-    [],
+    [code],
   );
+
   const homeSlots = formationToSlots("4-4-2", "HOME");
   const awaySlots = formationToSlots("4-4-2", "AWAY");
   const showPitch = simulating || matchOver;
@@ -577,10 +590,9 @@ function FriendlyRoom() {
         </div>
       </div>
 
-      {/* Pre-match state */}
+      {/* Pre-match */}
       {!showPitch && (
         <div className="panel" style={{ padding: 20, marginBottom: 12 }}>
-          {/* Host waiting for opponent */}
           {isHost && !lobby.guestTeam && (
             <div
               style={{
@@ -651,7 +663,6 @@ function FriendlyRoom() {
             </div>
           )}
 
-          {/* Both in lobby — show lineup builder (poin 3) */}
           {isParticipant && lobby.guestTeam && !isReady && (
             <div
               style={{
@@ -660,7 +671,6 @@ function FriendlyRoom() {
                 gap: 14,
               }}
             >
-              {/* Left: pitch formation */}
               <div>
                 <div
                   style={{
@@ -671,11 +681,10 @@ function FriendlyRoom() {
                     flexWrap: "wrap",
                   }}
                 >
-                  {/* Import Tactics — opens template picker modal */}
+                  {/* Import Tactics */}
                   <button
                     onClick={openImportModal}
                     disabled={importingTactics || lineupConfirmed}
-                    title="Import a saved tactics template"
                     style={{
                       padding: "7px 12px",
                       borderRadius: 6,
@@ -702,7 +711,6 @@ function FriendlyRoom() {
                     {importingTactics ? "⏳ Loading..." : "📋 Import Tactics"}
                   </button>
 
-                  {/* Import Tactics Modal */}
                   {showImportModal && (
                     <>
                       <div
@@ -771,7 +779,6 @@ function FriendlyRoom() {
                                   display: "flex",
                                   justifyContent: "space-between",
                                   alignItems: "center",
-                                  transition: "background 0.12s",
                                 }}
                                 onMouseEnter={(e) =>
                                   (e.currentTarget.style.background =
@@ -867,7 +874,6 @@ function FriendlyRoom() {
                     ))}
                   </select>
 
-                  {/* Poin 4: opponent status */}
                   <div
                     style={{
                       fontSize: 11,
@@ -1049,13 +1055,11 @@ function FriendlyRoom() {
                       strokeWidth="0.6"
                     />
                   </svg>
-
                   {pitchSlots.map((slot, slotIdx) => {
                     const occupantId = slotMap.get(slotIdx);
                     const occupant = myPlayers.find((p) => p.id === occupantId);
                     const isSelected =
                       !!selectedPlayer && occupant?.id === selectedPlayer.id;
-
                     return (
                       <div
                         key={slotIdx}
@@ -1117,12 +1121,12 @@ function FriendlyRoom() {
                             />
                             <span
                               style={{
-                                fontSize: 7,
+                                fontSize: 10,
                                 color: "#fff",
-                                background: "rgba(0,0,0,0.7)",
-                                padding: "1px 3px",
+                                background: "rgba(0,0,0,0.75)",
+                                padding: "1px 4px",
                                 borderRadius: 2,
-                                maxWidth: 40,
+                                maxWidth: 44,
                                 overflow: "hidden",
                                 textOverflow: "ellipsis",
                                 whiteSpace: "nowrap",
@@ -1166,7 +1170,7 @@ function FriendlyRoom() {
                 </div>
               </div>
 
-              {/* Right: bench/player list */}
+              {/* Bench */}
               <div style={{ display: "flex", flexDirection: "column" }}>
                 <div
                   style={{
@@ -1289,7 +1293,6 @@ function FriendlyRoom() {
               ...
             </p>
           )}
-
           {lobby.hostReady && lobby.guestReady && !simulating && (
             <div
               style={{
@@ -1317,7 +1320,7 @@ function FriendlyRoom() {
         </div>
       )}
 
-      {/* Live pitch — same layout as league match */}
+      {/* Live pitch */}
       {showPitch && (
         <div
           style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 12 }}
@@ -1385,7 +1388,7 @@ function FriendlyRoom() {
               awayFormationSlots={awaySlots}
               speed={1}
               onMinuteChange={handleMinuteChange}
-              paused={matchOver}
+              paused={matchOver || pitchPaused}
             />
           </div>
           <div
@@ -1625,7 +1628,154 @@ function FriendlyRoom() {
         </div>
       )}
 
-      {/* Poin 1: Leave lobby confirmation popup */}
+      {/* Half-time tactics modal */}
+      {showHalfTimeModal && (
+        <>
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 300,
+              background: "rgba(0,0,0,0.85)",
+              backdropFilter: "blur(6px)",
+            }}
+          />
+          <div
+            style={{
+              position: "fixed",
+              top: "50%",
+              left: "50%",
+              transform: "translate(-50%,-50%)",
+              zIndex: 301,
+              width: "min(420px, 90vw)",
+              background: "var(--panel-bg)",
+              border: "1px solid rgba(255,215,0,0.3)",
+              borderRadius: 14,
+              overflow: "hidden",
+              boxShadow: "0 20px 60px rgba(0,0,0,0.6)",
+            }}
+          >
+            <div
+              style={{
+                height: 3,
+                background:
+                  "linear-gradient(90deg, transparent, var(--ws-gold), transparent)",
+              }}
+            />
+            <div style={{ padding: "24px 22px" }}>
+              <div style={{ textAlign: "center", marginBottom: 20 }}>
+                <div style={{ fontSize: 36, marginBottom: 8 }}>⏱</div>
+                <div
+                  style={{
+                    fontFamily: "var(--display)",
+                    fontSize: "1.2rem",
+                    textTransform: "uppercase",
+                    letterSpacing: 2,
+                    color: "var(--ws-gold)",
+                  }}
+                >
+                  Half Time
+                </div>
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: "var(--ink-dim)",
+                    marginTop: 6,
+                  }}
+                >
+                  {halfTimeCountdown}s — choose your second half formation
+                </div>
+              </div>
+              <div style={{ marginBottom: 16 }}>
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: "var(--ink-dim)",
+                    textTransform: "uppercase",
+                    letterSpacing: 1,
+                    marginBottom: 8,
+                  }}
+                >
+                  Formation
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {(
+                    [
+                      "4-4-2",
+                      "4-3-3",
+                      "4-2-3-1",
+                      "3-5-2",
+                      "5-3-2",
+                      "4-5-1",
+                    ] as const
+                  ).map((f) => (
+                    <button
+                      key={f}
+                      onClick={() => setHalfTimeFormation(f)}
+                      style={{
+                        padding: "6px 14px",
+                        borderRadius: 6,
+                        border: "1px solid",
+                        borderColor:
+                          halfTimeFormation === f
+                            ? "var(--ws-gold)"
+                            : "var(--border)",
+                        background:
+                          halfTimeFormation === f
+                            ? "rgba(255,215,0,0.12)"
+                            : "transparent",
+                        color:
+                          halfTimeFormation === f
+                            ? "var(--ws-gold)"
+                            : "var(--ink-dim)",
+                        cursor: "pointer",
+                        fontSize: 12,
+                        fontFamily: "var(--mono)",
+                      }}
+                    >
+                      {f}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div
+                style={{
+                  fontSize: 12,
+                  color: opponentHalfTimeConfirmed
+                    ? "var(--ws-green-bright)"
+                    : "var(--ink-dim)",
+                  marginBottom: 16,
+                }}
+              >
+                {opponentHalfTimeConfirmed
+                  ? "✓ Opponent confirmed"
+                  : "⏳ Waiting for opponent..."}
+              </div>
+              <button
+                onClick={confirmHalfTimeTactics}
+                style={{
+                  width: "100%",
+                  padding: "12px",
+                  borderRadius: 8,
+                  border: "none",
+                  background: "var(--ws-gold)",
+                  color: "#0a0d12",
+                  fontFamily: "var(--display)",
+                  fontWeight: 700,
+                  fontSize: 13,
+                  textTransform: "uppercase",
+                  letterSpacing: 1,
+                  cursor: "pointer",
+                }}
+              >
+                ✓ Confirm & Continue
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Leave lobby popup */}
       {showLeavePopup && (
         <>
           <div
@@ -1726,7 +1876,7 @@ function FriendlyRoom() {
         </>
       )}
 
-      {/* Poin 2: Surrender confirmation popup */}
+      {/* Surrender popup */}
       {showSurrenderPopup && (
         <>
           <div
@@ -2029,7 +2179,7 @@ function TeamChip({
   team: { name: string; logoSvg: string | null; jerseyColor: string };
   ready?: boolean;
   waiting?: boolean;
-  matching?: boolean; // true when match has started — shows "⚽ Matching" instead of Ready
+  matching?: boolean;
 }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
